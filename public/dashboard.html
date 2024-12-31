@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sports Analytics Dashboard</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="bg-gray-900 text-white">
+    <!-- Navigation Bar -->
+    <nav class="bg-gray-800 p-4 fixed w-full z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-8">
+                <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
+                <select id="leagueSelect" class="bg-gray-700 text-white p-2 rounded">
+                    <option value="nba">NBA</option>
+                    <option value="nfl">NFL</option>
+                    <option value="mlb">MLB</option>
+                    <option value="nhl">NHL</option>
+                </select>
+            </div>
+            <div class="flex items-center space-x-4">
+                <a href="/visualization" class="hover:text-blue-400">Visualizations</a>
+                <a href="/preferences" class="hover:text-blue-400">Preferences</a>
+                <span id="connectionStatus" class="text-green-500">●</span>
+                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="pt-20">
+        <div class="container mx-auto px-4 py-8">
+            <!-- Live Updates Section -->
+            <div id="liveUpdates" class="mb-8 bg-blue-900/30 p-4 rounded-lg hidden">
+                <h2 class="text-xl font-bold mb-2">Live Updates</h2>
+                <div id="liveContent" class="animate-pulse"></div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <!-- Recent Games -->
+                <div class="bg-gray-800 p-6 rounded-lg">
+                    <h2 class="text-2xl font-bold mb-4">Recent Games</h2>
+                    <div id="recentGames" class="space-y-4"></div>
+                </div>
+
+                <!-- Performance Chart -->
+                <div class="bg-gray-800 p-6 rounded-lg">
+                    <h2 class="text-2xl font-bold mb-4">Team Performance</h2>
+                    <canvas id="statsChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let currentChart = null;
+
+        function connectWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                document.getElementById('connectionStatus').className = 'text-green-500';
+                subscribeToLeague(document.getElementById('leagueSelect').value);
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                updateDashboard(data);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected');
+                document.getElementById('connectionStatus').className = 'text-red-500';
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        function subscribeToLeague(league) {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'subscribe', league }));
+            }
+        }
+
+        async function fetchGames(league) {
+            try {
+                const response = await fetch(`/api/games/${league}`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                
+                const data = await response.json();
+                displayGames(data);
+                updateChart(data);
+            } catch (error) {
+                console.error('Error:', error);
+                if (error.message === 'Unauthorized') {
+                    window.location.href = '/login';
+                }
+            }
+        }
+
+        function displayGames(games) {
+            const container = document.getElementById('recentGames');
+            container.innerHTML = games.slice(0, 5).map(game => `
+                <div class="bg-gray-700 p-4 rounded hover:bg-gray-600 transition-colors">
+                    <div class="flex justify-between items-center">
+                        <div class="text-lg">
+                            <div class="font-bold">${game.homeTeam.name}</div>
+                            <div class="text-2xl">${game.homeTeam.score || '-'}</div>
+                        </div>
+                        <div class="text-gray-400 mx-4">VS</div>
+                        <div class="text-lg text-right">
+                            <div class="font-bold">${game.awayTeam.name}</div>
+                            <div class="text-2xl">${game.awayTeam.score || '-'}</div>
+                        </div>
+                    </div>
+                    <div class="text-sm text-gray-400 mt-2">
+                        ${new Date(game.date).toLocaleDateString()}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateChart(games) {
+            if (currentChart) {
+                currentChart.destroy();
+            }
+
+            const teams = {};
+            games.forEach(game => {
+                if (!teams[game.homeTeam.name]) {
+                    teams[game.homeTeam.name] = {
+                        scores: [],
+                        wins: 0,
+                        games: 0
+                    };
+                }
+                teams[game.homeTeam.name].scores.push(parseInt(game.homeTeam.score) || 0);
+                teams[game.homeTeam.name].games++;
+                if (parseInt(game.homeTeam.score) > parseInt(game.awayTeam.score)) {
+                    teams[game.homeTeam.name].wins++;
+                }
+            });
+
+            const ctx = document.getElementById('statsChart').getContext('2d');
+            currentChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: Object.keys(teams),
+                    datasets: [{
+                        label: 'Win Percentage',
+                        data: Object.values(teams).map(team => 
+                            (team.wins / team.games * 100).toFixed(1)
+                        ),
+                        backgroundColor: 'rgba(59, 130, 246, 0.5)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            labels: { color: 'white' }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: 'white' }
+                        },
+                        x: {
+                            ticks: { color: 'white' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        }
+
+        // Event Listeners
+        document.getElementById('leagueSelect').addEventListener('change', (e) => {
+            fetchGames(e.target.value);
+            subscribeToLeague(e.target.value);
+        });
+
+        // Initialize
+        connectWebSocket();
+        fetchGames('nba');
+
+        // Check auth status
+        if (!localStorage.getItem('token')) {
+            window.location.href = '/';
+        }
+    </script>
+</body>
+</html>
