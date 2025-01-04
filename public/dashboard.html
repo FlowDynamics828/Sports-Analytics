@@ -2,113 +2,209 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - Sports Analytics Pro</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/react@17/umd/react.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@17/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/recharts/dist/recharts.min.js"></script>
-    <script src="dashboard-scripts.js" defer></script>
+    <link href="/dashboard/styles/dashboard.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Add authentication check before page loads -->
+    <script>
+        // Check authentication before loading page content
+        (function checkAuth() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.replace('/login');
+                return;
+            }
+        })();
+    </script>
+    <style>
+        .stat-card {
+            transition: transform 0.2s ease-in-out;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white">
-    <!-- Navigation Bar -->
+<body class="bg-gray-900 text-white min-h-screen">
+
+<!-- Navigation -->
     <nav class="bg-gray-800 p-4 fixed w-full z-50">
         <div class="container mx-auto flex justify-between items-center">
             <div class="flex items-center space-x-8">
                 <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
-                <select id="leagueSelect" class="bg-gray-700 text-white p-2 rounded">
-                    <option value="nba">NBA</option>
-                    <option value="nfl">NFL</option>
-                    <option value="mlb">MLB</option>
-                    <option value="nhl">NHL</option>
-                </select>
+                <div class="flex space-x-4">
+                    <select id="leagueSelect" class="bg-gray-700 text-white p-2 rounded">
+                        <option value="nba">NBA</option>
+                        <option value="nfl">NFL</option>
+                        <option value="mlb">MLB</option>
+                        <option value="nhl">NHL</option>
+                        <option value="premier-league">Premier League</option>
+                        <option value="la-liga">La Liga</option>
+                        <option value="bundesliga">Bundesliga</option>
+                        <option value="serie-a">Serie A</option>
+                    </select>
+                    <select id="teamSelect" class="bg-gray-700 text-white p-2 rounded">
+                        <option value="">Select Team</option>
+                    </select>
+                </div>
             </div>
             <div class="flex items-center space-x-4">
-                <a href="/visualization" class="hover:text-blue-400">Visualizations</a>
+                <span id="userSubscription" class="px-3 py-1 bg-blue-600 rounded-full text-sm"></span>
+                <a href="/profile" class="hover:text-blue-400">Profile</a>
                 <a href="/preferences" class="hover:text-blue-400">Preferences</a>
-                <span id="connectionStatus" class="text-green-500">●</span>
-                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Logout</button>
+                <div class="flex items-center">
+                    <span id="connectionStatus" class="text-green-500 mr-2">●</span>
+                    <span id="connectionText" class="text-sm">Connected</span>
+                </div>
+                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700 transition-colors">
+                    Logout
+                </button>
             </div>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="pt-20">
-        <div class="container mx-auto px-4 py-8">
-            <!-- Live Updates Section -->
-            <div id="liveUpdates" class="mb-8 bg-blue-900/30 p-4 rounded-lg hidden">
-                <h2 class="text-xl font-bold mb-2">Live Updates</h2>
-                <div id="liveContent" class="animate-pulse"></div>
+    <div class="pt-20 pb-8">
+        <div class="container mx-auto px-4">
+            <!-- Welcome Section -->
+            <div class="mb-8">
+                <h1 class="text-3xl font-bold mb-2">Welcome, <span id="welcomeName">User</span>!</h1>
+                <p class="text-gray-400">Here's your sports analytics overview</p>
             </div>
 
-            <!-- Dashboard React Component Mount Point -->
-            <div id="dashboardRoot"></div>
+            <!-- Live Updates Section -->
+            <div id="liveUpdates" class="mb-8 bg-blue-900/30 p-4 rounded-lg hidden">
+                <div class="flex justify-between items-center">
+                    <h2 class="text-xl font-bold">Live Updates</h2>
+                    <span class="animate-pulse text-blue-400">●</span>
+                </div>
+                <div id="liveContent" class="mt-2"></div>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-gray-800 p-6 rounded-lg stat-card">
+                    <h3 class="text-lg font-bold mb-2">Total Games</h3>
+                    <p id="totalGames" class="text-3xl font-bold text-blue-500">-</p>
+                    <p class="text-gray-400 text-sm mt-2">Last 7 days</p>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg stat-card">
+                    <h3 class="text-lg font-bold mb-2">Average Score</h3>
+                    <p id="avgScore" class="text-3xl font-bold text-blue-500">-</p>
+                    <p class="text-gray-400 text-sm mt-2">Points per game</p>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg stat-card">
+                    <h3 class="text-lg font-bold mb-2">Home Win Rate</h3>
+                    <p id="winRate" class="text-3xl font-bold text-blue-500">-</p>
+                    <p class="text-gray-400 text-sm mt-2">Home team advantage</p>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="bg-gray-800 p-6 rounded-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold">Recent Games</h2>
+                        <select id="gamesFilter" class="bg-gray-700 text-white p-2 rounded text-sm">
+                            <option value="5">Last 5 games</option>
+                            <option value="10">Last 10 games</option>
+                            <option value="20">Last 20 games</option>
+                        </select>
+                    </div>
+                    <div id="recentGames" class="space-y-4 max-h-[500px] overflow-y-auto"></div>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold">Performance Trend</h2>
+                        <select id="chartType" class="bg-gray-700 text-white p-2 rounded text-sm">
+                            <option value="score">Scores</option>
+                            <option value="differential">Point Differential</option>
+                        </select>
+                    </div>
+                    <div class="h-[500px]">
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-gray-900/50 flex items-center justify-center hidden">
+        <div class="bg-gray-800 p-6 rounded-lg">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="text-center mt-4">Loading data...</p>
+        </div>
+    </div>
+
+    <!-- Authentication Script -->
     <script>
-        // Authentication Check
-        if (!localStorage.getItem('token')) {
-            window.location.href = '/';
-        }
-
-        // WebSocket Connection
-        let ws;
-        
-        function connectWebSocket() {
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
-            
-            ws.onopen = () => {
-                console.log('WebSocket connected');
-                document.getElementById('connectionStatus').className = 'text-green-500';
-                subscribeToLeague(document.getElementById('leagueSelect').value);
-            };
-
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                updateDashboard(data);
-            };
-
-            ws.onclose = () => {
-                console.log('WebSocket disconnected');
-                document.getElementById('connectionStatus').className = 'text-red-500';
-                setTimeout(connectWebSocket, 3000);
-            };
-        }
-
-        function subscribeToLeague(league) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'subscribe', league }));
+        // Verify authentication on page load
+        function verifyAuth() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.replace('/login');
+                return;
             }
+
+            fetch('/api/user/profile', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Authentication failed');
+                return response.json();
+            })
+            .then(userData => {
+                document.getElementById('welcomeName').textContent = userData.email.split('@')[0];
+                document.getElementById('userSubscription').textContent = 
+                    userData.subscription.charAt(0).toUpperCase() + userData.subscription.slice(1);
+            })
+            .catch(() => {
+                localStorage.clear();
+                window.location.replace('/login');
+            });
         }
 
-        function updateDashboard(data) {
-            // Update live updates section
-            const liveUpdates = document.getElementById('liveUpdates');
-            const liveContent = document.getElementById('liveContent');
-            
-            liveUpdates.classList.remove('hidden');
-            liveContent.textContent = JSON.stringify(data);
-            
-            // Refresh component data
-            if (window.updateDashboardData) {
-                window.updateDashboardData(data);
+        // Add authentication headers to all fetch requests
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options = {}) {
+            const token = localStorage.getItem('token');
+            if (token) {
+                options.headers = {
+                    ...options.headers,
+                    'Authorization': `Bearer ${token}`
+                };
             }
-        }
+            return originalFetch(url, options);
+        };
 
         function logout() {
-            localStorage.removeItem('token');
-            window.location.href = '/';
+            localStorage.clear();
+            window.location.replace('/login');
         }
 
-        // Initialize WebSocket connection
-        connectWebSocket();
-
-        // League selection change handler
-        document.getElementById('leagueSelect').addEventListener('change', (e) => {
-            subscribeToLeague(e.target.value);
-        });
+        // Initialize authentication
+        verifyAuth();
     </script>
+
+    <!-- Load other scripts -->
+    <script src="dashboard/scripts/websocket.js"></script>
+    <script src="dashboard/scripts/dashboard.js"></script>
+
+<script type="module">
+    import DashboardManager from '/dashboard/components/dashboardManager.js';
+    new DashboardManager();
+</script>
+
 </body>
 </html>

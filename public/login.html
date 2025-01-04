@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Login - Sports Analytics Pro</title>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com;">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="min-h-screen flex items-center justify-center">
+        <div class="max-w-md w-full p-6">
+            <h1 class="text-3xl font-bold text-center mb-8">Welcome Back</h1>
+            
+            <!-- Login Form with Debug Info -->
+            <form id="loginForm" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2">Email</label>
+                    <input type="email" id="email" required 
+                           class="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none text-white">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium mb-2">Password</label>
+                    <input type="password" id="password" required 
+                           class="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none text-white">
+                </div>
+
+                <!-- Debug Info Display -->
+                <div id="debugInfo" class="text-xs text-gray-400 hidden"></div>
+
+                <!-- Loading Indicator -->
+                <div id="loadingIndicator" class="hidden">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                </div>
+
+                <!-- Error Message Display -->
+                <div id="errorMessage" class="text-red-500 text-center hidden"></div>
+
+                <button type="submit" id="submitButton"
+                        class="w-full bg-blue-600 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+                    Sign In
+                </button>
+            </form>
+
+            <div class="mt-4 text-center">
+                <p class="text-gray-400">Don't have an account? 
+                    <a href="/signup" class="text-blue-400 hover:text-blue-300">Sign up</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showDebug(message) {
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.textContent = message;
+            debugInfo.classList.remove('hidden');
+        }
+
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const errorMessage = document.getElementById('errorMessage');
+            const submitButton = document.getElementById('submitButton');
+            const loadingIndicator = document.getElementById('loadingIndicator');
+
+            // Reset UI
+            errorMessage.classList.add('hidden');
+            submitButton.disabled = true;
+            submitButton.textContent = 'Signing in...';
+            loadingIndicator.classList.remove('hidden');
+            showDebug('Attempting login...');
+
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                showDebug('Received response...');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    showDebug('Login successful, storing token...');
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('userEmail', data.user.email);
+                    localStorage.setItem('userSubscription', data.user.subscription);
+                    
+                    showDebug('Redirecting to dashboard...');
+                    window.location.href = '/dashboard';
+                } else {
+                    showDebug('Login failed: ' + (data.error || 'Unknown error'));
+                    errorMessage.textContent = data.error || 'Login failed';
+                    errorMessage.classList.remove('hidden');
+                }
+            } catch (error) {
+                showDebug('Error: ' + error.message);
+                errorMessage.textContent = 'Connection error. Please try again.';
+                errorMessage.classList.remove('hidden');
+            } finally {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Sign In';
+                loadingIndicator.classList.add('hidden');
+            }
+        });
+
+        // Clear any existing auth data
+        window.addEventListener('load', () => {
+            localStorage.clear();
+            showDebug('Local storage cleared');
+        });
+    </script>
+</body>
+</html>

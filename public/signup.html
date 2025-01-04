@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sign Up - Sports Analytics Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body class="bg-gray-900 text-white">
+    <div class="min-h-screen flex items-center justify-center">
+        <div class="max-w-md w-full p-6">
+            <h1 class="text-3xl font-bold text-center mb-8">Create Your Account</h1>
+            
+            <form id="signupForm" class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium mb-2">Email</label>
+                    <input type="email" id="email" required 
+                           class="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none text-white">
+                </div>
+                
+                <div>
+                    <label class="block text-sm font-medium mb-2">Password</label>
+                    <input type="password" id="password" required 
+                           class="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none text-white">
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium mb-2">Subscription Plan</label>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer hover:border-blue-500">
+                            <input type="radio" name="subscription" value="basic" data-price="price_basic" required>
+                            <div class="text-lg font-bold">Basic</div>
+                            <div class="text-2xl mb-2">$9.99</div>
+                            <div class="text-gray-400 text-sm">Monthly</div>
+                        </div>
+                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer hover:border-blue-500">
+                            <input type="radio" name="subscription" value="pro" data-price="price_pro">
+                            <div class="text-lg font-bold">Pro</div>
+                            <div class="text-2xl mb-2">$24.99</div>
+                            <div class="text-gray-400 text-sm">Monthly</div>
+                        </div>
+                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer hover:border-blue-500">
+                            <input type="radio" name="subscription" value="enterprise" data-price="price_enterprise">
+                            <div class="text-lg font-bold">Enterprise</div>
+                            <div class="text-2xl mb-2">$99.99</div>
+                            <div class="text-gray-400 text-sm">Monthly</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="card-element" class="p-3 rounded bg-gray-800 border border-gray-700">
+                    <!-- Stripe Card Element will be inserted here -->
+                </div>
+
+                <div id="card-errors" class="text-red-500 text-center hidden"></div>
+
+                <button type="submit" 
+                        class="w-full bg-blue-600 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+                    Create Account
+                </button>
+            </form>
+
+            <div class="mt-4 text-center">
+                <p class="text-gray-400">Already have an account? 
+                    <a href="/login" class="text-blue-400 hover:text-blue-300">Sign in</a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const stripe = Stripe('your_publishable_key');
+        const elements = stripe.elements();
+        const card = elements.create('card');
+        card.mount('#card-element');
+
+        const form = document.getElementById('signupForm');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const subscription = document.querySelector('input[name="subscription"]:checked').value;
+            const priceId = document.querySelector('input[name="subscription"]:checked').dataset.price;
+
+            try {
+                const { paymentMethod } = await stripe.createPaymentMethod({
+                    type: 'card',
+                    card: card,
+                });
+
+                const response = await fetch('/api/create-subscription', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email,
+                        paymentMethodId: paymentMethod.id,
+                        priceId
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    const { clientSecret } = data;
+                    
+                    const { error } = await stripe.confirmCardPayment(clientSecret);
+                    
+                    if (error) {
+                        throw new Error(error.message);
+                    }
+
+                    // Create user account
+                    const userResponse = await fetch('/api/auth/signup', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            email,
+                            password,
+                            subscription
+                        })
+                    });
+
+                    const userData = await userResponse.json();
+                    
+                    if (userResponse.ok) {
+                        localStorage.setItem('token', userData.token);
+                        window.location.href = '/dashboard';
+                    } else {
+                        throw new Error(userData.error);
+                    }
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch (error) {
+                const errorElement = document.getElementById('card-errors');
+                errorElement.textContent = error.message;
+                errorElement.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

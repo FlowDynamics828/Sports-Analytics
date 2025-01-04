@@ -30,13 +30,14 @@
     <nav class="bg-gray-800/80 backdrop-blur fixed w-full z-50">
         <div class="container mx-auto px-4">
             <div class="flex justify-between items-center h-16">
-                <a href="/" class="text-2xl font-bold">SportsAnalytics Pro</a>
+                <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
                 <div class="flex items-center space-x-8">
                     <a href="#features" class="hover:text-blue-400 transition-colors">Features</a>
                     <a href="#pricing" class="hover:text-blue-400 transition-colors">Pricing</a>
                     <a href="#leagues" class="hover:text-blue-400 transition-colors">Leagues</a>
-                    <a href="/dashboard" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors">
-                        Dashboard
+                    <a href="/login" class="hover:text-blue-400 transition-colors">Login</a>
+                    <a href="/signup" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg transition-colors">
+                        Sign Up
                     </a>
                 </div>
             </div>
@@ -54,7 +55,7 @@
                     Real-time data, advanced analytics, and insights from 16+ professional leagues
                 </p>
                 <div class="flex justify-center space-x-6">
-                    <a href="/dashboard" 
+                    <a href="/signup" 
                        class="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg font-semibold transition-colors">
                         Try Dashboard
                     </a>
@@ -129,20 +130,20 @@
                     <div>NHL</div>
                 </div>
                 <div class="bg-gray-800 p-6 rounded-lg text-center feature-card">
-                    <div class="text-2xl mb-2">🏀</div>
-                    <div>WNBA</div>
-                </div>
-                <div class="bg-gray-800 p-6 rounded-lg text-center feature-card">
-                    <div class="text-2xl mb-2">⚽</div>
-                    <div>MLS</div>
-                </div>
-                <div class="bg-gray-800 p-6 rounded-lg text-center feature-card">
                     <div class="text-2xl mb-2">⚽</div>
                     <div>Premier League</div>
                 </div>
                 <div class="bg-gray-800 p-6 rounded-lg text-center feature-card">
                     <div class="text-2xl mb-2">⚽</div>
                     <div>La Liga</div>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg text-center feature-card">
+                    <div class="text-2xl mb-2">⚽</div>
+                    <div>Bundesliga</div>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg text-center feature-card">
+                    <div class="text-2xl mb-2">⚽</div>
+                    <div>Serie A</div>
                 </div>
             </div>
         </div>
@@ -179,17 +180,11 @@
                             </svg>
                             Basic Statistics
                         </li>
-                        <li class="flex items-center">
-                            <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                            </svg>
-                            Email Support
-                        </li>
                     </ul>
-                    <button onclick="location.href='/dashboard'" 
-                            class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg transition-colors">
+                    <a href="/signup" 
+                       class="block w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg text-center transition-colors">
                         Start Basic
-                    </button>
+                    </a>
                 </div>
 
                 <!-- Pro Plan -->
@@ -227,19 +222,13 @@
                             <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                             </svg>
-                            Priority Support
-                        </li>
-                        <li class="flex items-center">
-                            <svg class="w-5 h-5 text-green-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                            </svg>
                             API Access
                         </li>
                     </ul>
-                    <button onclick="location.href='/dashboard'" 
-                            class="w-full bg-white text-blue-600 hover:bg-gray-100 py-3 rounded-lg font-semibold transition-colors">
+                    <a href="/signup" 
+                       class="block w-full bg-white text-blue-600 hover:bg-gray-100 py-3 rounded-lg text-center font-semibold transition-colors">
                         Start Pro
-                    </button>
+                    </a>
                 </div>
 
                 <!-- Enterprise Plan -->
@@ -256,76 +245,73 @@
                             </svg>
                             All Pro Features
                         </li>
-                       <li class="flex items-center">
-    <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-    </svg>
-    Custom Analytics
-</li>
-<li class="flex items-center">
-    <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-    </svg>
-    Dedicated Support
-</li>
-<li class="flex items-center">
-    <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-    </svg>
-    White Label Option
-</li>
-<li class="flex items-center">
-    <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-    </svg>
-    Custom Integration
-</li>
-</ul>
-<button onclick="location.href='/dashboard'" 
-        class="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg transition-colors">
-    Contact Sales
-</button>
-</div>
-</div>
-</div>
-
-<!-- Footer Section -->
-<footer class="bg-gray-800 py-12">
-    <div class="container mx-auto px-4">
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
-            <div>
-                <h3 class="text-xl font-bold mb-4">Sports Analytics Pro</h3>
-                <p class="text-gray-400">Professional sports data and analytics platform</p>
+                          <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            Custom Analytics
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            Dedicated Support
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                            White Label Option
+                        </li>
+                    </ul>
+                    <a href="/signup" 
+                       class="block w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-lg text-center transition-colors">
+                        Start Enterprise
+                    </a>
+                </div>
             </div>
-            <div>
-                <h4 class="font-bold mb-4">Features</h4>
-                <ul class="space-y-2 text-gray-400">
-                    <li>Live Updates</li>
-                    <li>Advanced Analytics</li>
-                    <li>API Access</li>
-                    <li>Custom Solutions</li>
-                </ul>
-            </div>
-            <div>
-                <h4 class="font-bold mb-4">Leagues</h4>
-                <ul class="space-y-2 text-gray-400">
-                    <li>NBA</li>
-                    <li>NFL</li>
-                    <li>MLB</li>
-                    <li>More...</li>
-                </ul>
-            </div>
-            <div>
-                <h4 class="font-bold mb-4">Contact</h4>
-                <ul class="space-y-2 text-gray-400">
-                    <li>Support</li>
-                    <li>Sales</li>
-                    <li>API Documentation</li>
-                </ul>
-            </div>
-        </div>
-        <div class="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
-            &copy; 2024 Sports Analytics Pro. All rights reserved.
         </div>
     </div>
-</footer>
+
+    <!-- Footer -->
+    <footer class="bg-gray-800 py-12">
+        <div class="container mx-auto px-4">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div>
+                    <h3 class="text-xl font-bold mb-4">Sports Analytics Pro</h3>
+                    <p class="text-gray-400">Professional sports data and analytics platform</p>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Features</h4>
+                    <ul class="space-y-2 text-gray-400">
+                        <li>Live Updates</li>
+                        <li>Advanced Analytics</li>
+                        <li>API Access</li>
+                        <li>Custom Solutions</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Leagues</h4>
+                    <ul class="space-y-2 text-gray-400">
+                        <li>NBA</li>
+                        <li>NFL</li>
+                        <li>MLB</li>
+                        <li>NHL</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Contact</h4>
+                    <ul class="space-y-2 text-gray-400">
+                        <li>Support</li>
+                        <li>Sales</li>
+                        <li>API Documentation</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-gray-700 mt-8 pt-8 text-center text-gray-400">
+                &copy; 2024 Sports Analytics Pro. All rights reserved.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
