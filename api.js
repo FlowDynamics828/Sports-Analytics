@@ -8,6 +8,13 @@ const { MongoClient, ObjectId } = require('mongodb');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const paymentRoutes = require('./routes/payment');
+const leagues = require('./leagues.js');
+
+// Environment Variables Check
+if (!process.env.JWT_SECRET || !process.env.MONGODB_URI) {
+    console.error('Critical environment variables missing');
+    process.exit(1);
+}
 
 // Initialize express and create HTTP server
 const app = express();
@@ -17,11 +24,9 @@ const port = process.env.PORT || 4000;
 // Create WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// JWT Secret Key
-const JWT_SECRET = process.env.JWT_SECRET || 'sportsAnalytics2024SecureToken@#$%^&*()123456789';
-
-// MongoDB Connection String
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://SportAnalytics:Studyhard%402034@cluster0.et16d.mongodb.net/sports-analytics?retryWrites=true&w=majority';
+// Constants
+const JWT_SECRET = process.env.JWT_SECRET;
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // MongoDB Connection Function
 async function connectDB() {
@@ -40,24 +45,31 @@ async function connectDB() {
     }
 }
 
+// Debug Endpoint
+app.get('/api/debug', (req, res) => {
+    res.json({
+        status: 'ok',
+        auth: !!JWT_SECRET,
+        db: !!MONGODB_URI,
+        leagues: Object.keys(leagues),
+        environment: process.env.NODE_ENV
+    });
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use('/api', paymentRoutes);
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/dashboard/components', express.static('public/dashboard/components', {
-    setHeaders: (res, path) => {
-        if (path.endsWith('.js')) {
-            res.setHeader('Content-Type', 'application/javascript');
-        }
-    }
-}));
+app.use('/dashboard/components', express.static('public/dashboard/components'));
+app.use('/dashboard/scripts', express.static('public/dashboard/scripts'));
+app.use('/dashboard/services', express.static('public/dashboard/services'));
 
 // Security Headers Middleware
 app.use((req, res, next) => {
     res.setHeader(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' ws: wss:;"
+        "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; connect-src 'self' ws: wss:; img-src 'self' data:; font-src 'self' https://cdnjs.cloudflare.com;"
     );
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
@@ -74,14 +86,30 @@ function authenticateToken(req, res, next) {
         return res.status(401).json({ error: 'Authentication required' });
     }
 
-    jwt.verify(token, JWT_SECRET, (err, user) => {
-        if (err) {
-            return res.status(403).json({ error: 'Invalid or expired token' });
-        }
-        req.user = user;
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
         next();
-    });
+    } catch (error) {
+        console.error('Token verification error:', error);
+        if (error.name === 'TokenExpiredError') {
+            return res.status(401).json({ error: 'Token expired' });
+        }
+        return res.status(403).json({ error: 'Invalid token' });
+    }
 }
+
+// Health Check
+app.get('/api/health', async (req, res) => {
+    try {
+        const client = await connectDB();
+        await client.db('sports-analytics').command({ ping: 1 });
+        await client.close();
+        res.json({ status: 'ok', message: 'Service healthy' });
+    } catch (error) {
+        res.status(500).json({ status: 'error', message: error.message });
+    }
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -100,7 +128,32 @@ app.get('/dashboard', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
 });
 
-// API Routes
+// User Profile Endpoint
+app.get('/api/user/profile', authenticateToken, async (req, res) => {
+    const client = await connectDB();
+    try {
+        const user = await client.db('sports-analytics')
+            .collection('users')
+            .findOne({ email: req.user.email });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json({
+            email: user.email,
+            subscription: user.subscription,
+            createdAt: user.createdAt
+        });
+    } catch (error) {
+        console.error('Profile error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        await client.close();
+    }
+});
+
+// Login Endpoint
 app.post('/api/auth/login', async (req, res) => {
     const client = await connectDB();
     try {
@@ -143,6 +196,7 @@ app.post('/api/auth/login', async (req, res) => {
     }
 });
 
+// Signup Endpoint
 app.post('/api/auth/signup', async (req, res) => {
     const client = await connectDB();
     try {
@@ -190,25 +244,84 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 });
 
-// User Profile Route
-app.get('/api/user/profile', authenticateToken, async (req, res) => {
-    const client = await connectDB();
+// Teams Endpoint
+app.get('/api/leagues/:league/teams', authenticateToken, async (req, res) => {
     try {
-        const user = await client.db('sports-analytics')
-            .collection('users')
-            .findOne({ email: req.user.email });
-
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        const { league } = req.params;
+        
+        if (!leagues[league.toLowerCase()]) {
+            return res.status(404).json({ error: 'League not found' });
         }
 
-        res.json({
-            email: user.email,
-            subscription: user.subscription,
-            createdAt: user.createdAt
-        });
+        res.json(leagues[league.toLowerCase()].teams);
     } catch (error) {
-        console.error('Profile error:', error);
+        console.error('Teams error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Stats Endpoint
+app.get('/api/stats/:league', authenticateToken, async (req, res) => {
+    const client = await connectDB();
+    try {
+        const { league } = req.params;
+        const { team } = req.query;
+        const db = client.db('sports-analytics');
+        
+        let query = { league: league.toUpperCase() };
+        if (team) {
+            query.$or = [
+                { 'homeTeam.id': team },
+                { 'awayTeam.id': team }
+            ];
+        }
+
+        const games = await db.collection('games')
+            .find(query)
+            .toArray();
+
+        const stats = {
+            totalGames: games.length,
+            averageScore: games.reduce((acc, game) => 
+                acc + (game.homeTeam.score + game.awayTeam.score) / 2, 0) / games.length || 0,
+            homeWinPercentage: games.length ? 
+                (games.filter(game => game.homeTeam.score > game.awayTeam.score).length / games.length) * 100 : 0
+        };
+
+        res.json(stats);
+    } catch (error) {
+        console.error('Stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        await client.close();
+    }
+});
+
+// Games Endpoint
+app.get('/api/games/:league', authenticateToken, async (req, res) => {
+    const client = await connectDB();
+    try {
+        const { league } = req.params;
+        const { team } = req.query;
+        const db = client.db('sports-analytics');
+        
+        let query = { league: league.toUpperCase() };
+        if (team) {
+            query.$or = [
+                { 'homeTeam.id': team },
+                { 'awayTeam.id': team }
+            ];
+        }
+
+        const games = await db.collection('games')
+            .find(query)
+            .sort({ date: -1 })
+            .limit(20)
+            .toArray();
+
+        res.json(games);
+    } catch (error) {
+        console.error('Games error:', error);
         res.status(500).json({ error: 'Internal server error' });
     } finally {
         await client.close();
@@ -216,34 +329,44 @@ app.get('/api/user/profile', authenticateToken, async (req, res) => {
 });
 
 // WebSocket Connection Handling
-wss.on('connection', (ws) => {
-    console.log('New WebSocket connection established');
+wss.on('connection', (ws, req) => {
+    const token = new URL(req.url, 'http://localhost').searchParams.get('token');
     
-    ws.on('message', (message) => {
-        try {
-            const data = JSON.parse(message);
-            if (data.type === 'subscribe') {
-                ws.league = data.league;
-                console.log(`Client subscribed to league: ${data.league}`);
+    if (!token) {
+        ws.close(1008, 'Authentication required');
+        return;
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        ws.user = decoded;
+        
+        console.log('WebSocket connected for user:', decoded.email);
+        
+        ws.on('message', (message) => {
+            try {
+                const data = JSON.parse(message);
+                if (data.type === 'subscribe') {
+                    ws.league = data.league;
+                    console.log(`Client subscribed to league: ${data.league}`);
+                }
+            } catch (error) {
+                console.error('WebSocket message error:', error);
+                ws.send(JSON.stringify({ error: 'Invalid message format' }));
             }
-        } catch (error) {
-            console.error('WebSocket message error:', error);
-        }
-    });
+        });
 
-    ws.on('error', (error) => {
-        console.error('WebSocket error:', error);
-    });
+        ws.on('error', (error) => {
+            console.error('WebSocket error:', error);
+        });
 
-    ws.on('close', () => {
-        console.log('Client disconnected');
-    });
-});
-
-// Error Handling Middleware
-app.use((err, req, res, next) => {
-    console.error('Server error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+        ws.on('close', () => {
+            console.log('Client disconnected:', decoded.email);
+        });
+    } catch (error) {
+        console.error('WebSocket auth error:', error);
+        ws.close(1008, 'Invalid token');
+    }
 });
 
 // Start Server
@@ -252,5 +375,4 @@ server.listen(port, () => {
     console.log('Environment:', process.env.NODE_ENV || 'development');
 });
 
-// Export app and server (removed the catch block that was causing the error)
 module.exports = { app, server };

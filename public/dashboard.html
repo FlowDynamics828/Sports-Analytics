@@ -6,15 +6,27 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <link href="/dashboard/styles/dashboard.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Add authentication check before page loads -->
     <script>
-        // Check authentication before loading page content
         (function checkAuth() {
             const token = localStorage.getItem('token');
             if (!token) {
                 window.location.replace('/login');
                 return;
             }
+
+            fetch('/api/user/profile', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Invalid token');
+                return response.json();
+            })
+            .catch(() => {
+                localStorage.clear();
+                window.location.replace('/login');
+            });
         })();
     </script>
     <style>
@@ -34,22 +46,22 @@
     </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
-
-<!-- Navigation -->
+    <!-- Navigation -->
     <nav class="bg-gray-800 p-4 fixed w-full z-50">
         <div class="container mx-auto flex justify-between items-center">
             <div class="flex items-center space-x-8">
                 <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
                 <div class="flex space-x-4">
-                    <select id="leagueSelect" class="bg-gray-700 text-white p-2 rounded">
-                        <option value="nba">NBA</option>
-                        <option value="nfl">NFL</option>
-                        <option value="mlb">MLB</option>
-                        <option value="nhl">NHL</option>
-                        <option value="premier-league">Premier League</option>
-                        <option value="la-liga">La Liga</option>
-                        <option value="bundesliga">Bundesliga</option>
-                        <option value="serie-a">Serie A</option>
+                   <select id="leagueSelect" class="bg-gray-700 text-white p-2 rounded">
+    <option value="nba">NBA</option>
+    <option value="nfl">NFL</option>
+    <option value="mlb">MLB</option>
+    <option value="nhl">NHL</option>
+    <option value="premierleague">Premier League</option>
+    <option value="laliga">La Liga</option>
+    <option value="bundesliga">Bundesliga</option>
+    <option value="seriea">Serie A</option>
+</select>
                     </select>
                     <select id="teamSelect" class="bg-gray-700 text-white p-2 rounded">
                         <option value="">Select Team</option>
@@ -78,15 +90,6 @@
             <div class="mb-8">
                 <h1 class="text-3xl font-bold mb-2">Welcome, <span id="welcomeName">User</span>!</h1>
                 <p class="text-gray-400">Here's your sports analytics overview</p>
-            </div>
-
-            <!-- Live Updates Section -->
-            <div id="liveUpdates" class="mb-8 bg-blue-900/30 p-4 rounded-lg hidden">
-                <div class="flex justify-between items-center">
-                    <h2 class="text-xl font-bold">Live Updates</h2>
-                    <span class="animate-pulse text-blue-400">●</span>
-                </div>
-                <div id="liveContent" class="mt-2"></div>
             </div>
 
             <!-- Stats Grid -->
@@ -145,9 +148,7 @@
         </div>
     </div>
 
-    <!-- Authentication Script -->
     <script>
-        // Verify authentication on page load
         function verifyAuth() {
             const token = localStorage.getItem('token');
             if (!token) {
@@ -175,7 +176,6 @@
             });
         }
 
-        // Add authentication headers to all fetch requests
         const originalFetch = window.fetch;
         window.fetch = function(url, options = {}) {
             const token = localStorage.getItem('token');
@@ -193,18 +193,10 @@
             window.location.replace('/login');
         }
 
-        // Initialize authentication
         verifyAuth();
     </script>
 
-    <!-- Load other scripts -->
-    <script src="dashboard/scripts/websocket.js"></script>
-    <script src="dashboard/scripts/dashboard.js"></script>
-
-<script type="module">
-    import DashboardManager from '/dashboard/components/dashboardManager.js';
-    new DashboardManager();
-</script>
-
+    <script type="module" src="/dashboard/scripts/dataService.js"></script>
+<script type="module" src="/dashboard/scripts/dashboard.js"></script>
 </body>
 </html>
