@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>User Preferences - Sports Analytics Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white">
+    <nav class="bg-gray-800 p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="/dashboard" class="text-2xl font-bold">Sports Analytics Pro</a>
+            <div class="space-x-4">
+                <a href="/dashboard" class="hover:text-blue-400">Dashboard</a>
+                <button id="savePreferences" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Save Changes</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-4 py-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Favorite Teams -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Favorite Teams</h2>
+                <div id="teamSelections" class="space-y-4">
+                    <!-- Teams will be populated here -->
+                </div>
+            </div>
+
+            <!-- Notification Settings -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Notifications</h2>
+                <div class="space-y-4">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="gameAlerts" class="mr-3">
+                        <label>Game Alerts</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="scoreUpdates" class="mr-3">
+                        <label>Score Updates</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input type="checkbox" id="newsAlerts" class="mr-3">
+                        <label>News Alerts</label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Display Settings -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Display Settings</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block mb-2">Default League</label>
+                        <select id="defaultLeague" class="w-full bg-gray-700 p-2 rounded">
+                            <option value="nba">NBA</option>
+                            <option value="nfl">NFL</option>
+                            <option value="mlb">MLB</option>
+                            <option value="nhl">NHL</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block mb-2">Data Refresh Rate</label>
+                        <select id="refreshRate" class="w-full bg-gray-700 p-2 rounded">
+                            <option value="30">30 seconds</option>
+                            <option value="60">1 minute</option>
+                            <option value="300">5 minutes</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        
+        function connectWebSocket() {
+            ws = new WebSocket(`wss://${window.location.host}`);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected');
+                loadUserPreferences();
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleRealtimeUpdate(data);
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket disconnected. Reconnecting...');
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        async function loadUserPreferences() {
+            try {
+                const response = await fetch('/api/user/preferences', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                const prefs = await response.json();
+                updatePreferencesUI(prefs);
+            } catch (error) {
+                console.error('Error loading preferences:', error);
+            }
+        }
+
+        function updatePreferencesUI(prefs) {
+            // Update checkboxes
+            document.getElementById('gameAlerts').checked = prefs.notifications?.gameAlerts || false;
+            document.getElementById('scoreUpdates').checked = prefs.notifications?.scoreUpdates || false;
+            document.getElementById('newsAlerts').checked = prefs.notifications?.newsAlerts || false;
+
+            // Update selects
+            document.getElementById('defaultLeague').value = prefs.displaySettings?.defaultLeague || 'nba';
+            document.getElementById('refreshRate').value = prefs.displaySettings?.refreshRate || '60';
+        }
+
+        document.getElementById('savePreferences').addEventListener('click', async () => {
+            const preferences = {
+                notifications: {
+                    gameAlerts: document.getElementById('gameAlerts').checked,
+                    scoreUpdates: document.getElementById('scoreUpdates').checked,
+                    newsAlerts: document.getElementById('newsAlerts').checked
+                },
+                displaySettings: {
+                    defaultLeague: document.getElementById('defaultLeague').value,
+                    refreshRate: document.getElementById('refreshRate').value
+                }
+            };
+
+            try {
+                await fetch('/api/user/preferences', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify(preferences)
+                });
+                alert('Preferences saved successfully!');
+            } catch (error) {
+                alert('Error saving preferences');
+            }
+        });
+
+        connectWebSocket();
+    </script>
+</body>
+</html>

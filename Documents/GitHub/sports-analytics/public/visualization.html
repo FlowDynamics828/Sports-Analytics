@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Data Visualization - Sports Analytics Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+</head>
+<body class="bg-gray-900 text-white">
+    <nav class="bg-gray-800 p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <a href="/dashboard" class="text-2xl font-bold">Sports Analytics Pro</a>
+            <div class="space-x-4">
+                <select id="leagueSelect" class="bg-gray-700 p-2 rounded">
+                    <option value="nba">NBA</option>
+                    <option value="nfl">NFL</option>
+                    <option value="mlb">MLB</option>
+                    <option value="nhl">NHL</option>
+                </select>
+                <select id="timeRange" class="bg-gray-700 p-2 rounded">
+                    <option value="7">Last 7 days</option>
+                    <option value="30">Last 30 days</option>
+                    <option value="90">Last 90 days</option>
+                </select>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mx-auto px-4 py-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Performance Chart -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Team Performance</h2>
+                <canvas id="performanceChart"></canvas>
+            </div>
+
+            <!-- Score Distribution -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Score Distribution</h2>
+                <canvas id="scoreChart"></canvas>
+            </div>
+
+            <!-- Win/Loss Ratio -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Win/Loss Ratio</h2>
+                <canvas id="winLossChart"></canvas>
+            </div>
+
+            <!-- Trend Analysis -->
+            <div class="bg-gray-800 p-6 rounded-lg">
+                <h2 class="text-xl font-bold mb-4">Trend Analysis</h2>
+                <canvas id="trendChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let charts = {};
+        
+        async function fetchData(league, days) {
+            const response = await fetch(`/api/stats/${league}?days=${days}`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                }
+            });
+            return await response.json();
+        }
+
+        function createPerformanceChart(data) {
+            const ctx = document.getElementById('performanceChart').getContext('2d');
+            if (charts.performance) charts.performance.destroy();
+            
+            charts.performance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.dates,
+                    datasets: data.teams.map(team => ({
+                        label: team.name,
+                        data: team.scores,
+                        borderColor: team.color,
+                        fill: false
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { color: 'white' }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: 'white' }
+                        },
+                        x: {
+                            ticks: { color: 'white' }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Add other chart creation functions...
+
+        async function updateVisualizations() {
+            const league = document.getElementById('leagueSelect').value;
+            const days = document.getElementById('timeRange').value;
+            const data = await fetchData(league, days);
+            
+            createPerformanceChart(data);
+            // Update other charts...
+        }
+
+        document.getElementById('leagueSelect').addEventListener('change', updateVisualizations);
+        document.getElementById('timeRange').addEventListener('change', updateVisualizations);
+
+        // Initial load
+        updateVisualizations();
+    </script>
+</body>
+</html>

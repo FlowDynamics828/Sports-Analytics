@@ -1,0 +1,60 @@
+.stat-card {
+    @apply bg-gray-800 p-6 rounded-lg transition-all duration-300 ease-in-out border border-gray-700;
+}
+
+.stat-card:hover {
+    @apply transform -translate-y-1 shadow-lg border-blue-500;
+}
+
+.stat-value {
+    @apply text-3xl font-bold text-blue-500;
+}
+
+.stat-label {
+    @apply text-sm text-gray-400;
+}
+
+.chart-container {
+    @apply bg-gray-800 p-6 rounded-lg border border-gray-700;
+    min-height: 400px;
+}
+
+.data-grid {
+    @apply grid grid-cols-1 md:grid-cols-3 gap-6;
+}
+
+.live-indicator {
+    @apply flex items-center space-x-2;
+}
+
+.live-dot {
+    @apply w-2 h-2 rounded-full;
+}
+
+.live-dot.active {
+    @apply bg-green-500 animate-pulse;
+}
+
+.live-dot.inactive {
+    @apply bg-red-500;
+}
+
+.dashboard-header {
+    @apply flex justify-between items-center mb-8;
+}
+
+.dropdown-menu {
+    @apply absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-gray-800 ring-1 ring-black ring-opacity-5;
+}
+
+.dropdown-item {
+    @apply block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700;
+}
+
+.nav-link {
+    @apply px-3 py-2 rounded-md text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-700;
+}
+
+.nav-link.active {
+    @apply bg-gray-900 text-white;
+}

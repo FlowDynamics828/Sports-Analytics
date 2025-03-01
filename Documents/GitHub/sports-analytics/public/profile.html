@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Profile - Sports Analytics Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-900 text-white">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 p-4 fixed w-full z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-8">
+                <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
+                <a href="/dashboard">Dashboard</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="connectionStatus" class="text-green-500">●</span>
+                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="pt-20">
+        <div class="container mx-auto px-4 py-8">
+            <!-- Profile Section -->
+            <div class="max-w-4xl mx-auto bg-gray-800 rounded-lg p-8">
+                <h1 class="text-3xl font-bold mb-8">User Profile</h1>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <!-- Personal Info -->
+                    <div>
+                        <h2 class="text-xl font-bold mb-4">Personal Information</h2>
+                        <form id="profileForm" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Email</label>
+                                <input type="email" id="email" readonly 
+                                       class="w-full p-3 rounded bg-gray-700 border border-gray-600">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Subscription Plan</label>
+                                <input type="text" id="subscription" readonly 
+                                       class="w-full p-3 rounded bg-gray-700 border border-gray-600">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Member Since</label>
+                                <input type="text" id="memberSince" readonly 
+                                       class="w-full p-3 rounded bg-gray-700 border border-gray-600">
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Preferences -->
+                    <div>
+                        <h2 class="text-xl font-bold mb-4">Preferences</h2>
+                        <form id="preferencesForm" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Favorite Teams</label>
+                                <select id="favoriteTeams" multiple 
+                                        class="w-full p-3 rounded bg-gray-700 border border-gray-600">
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-2">Notifications</label>
+                                <div class="space-y-2">
+                                    <label class="flex items-center">
+                                        <input type="checkbox" id="gameAlerts" 
+                                               class="mr-2 rounded bg-gray-700">
+                                        Game Alerts
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" id="newsAlerts" 
+                                               class="mr-2 rounded bg-gray-700">
+                                        News Alerts
+                                    </label>
+                                    <label class="flex items-center">
+                                        <input type="checkbox" id="scoreAlerts" 
+                                               class="mr-2 rounded bg-gray-700">
+                                        Score Updates
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit" 
+                                    class="w-full bg-blue-600 py-2 rounded hover:bg-blue-700 transition-colors">
+                                Save Preferences
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load user profile data
+        async function loadProfile() {
+            try {
+                const response = await fetch('/api/user/profile', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('email').value = data.email;
+                    document.getElementById('subscription').value = data.subscription;
+                    document.getElementById('memberSince').value = new Date(data.createdAt).toLocaleDateString();
+                    
+                    // Load preferences
+                    if (data.preferences) {
+                        document.getElementById('gameAlerts').checked = data.preferences.gameAlerts;
+                        document.getElementById('newsAlerts').checked = data.preferences.newsAlerts;
+                        document.getElementById('scoreAlerts').checked = data.preferences.scoreAlerts;
+                    }
+                }
+            } catch (error) {
+                console.error('Error loading profile:', error);
+            }
+        }
+
+        // Save preferences
+        document.getElementById('preferencesForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const preferences = {
+                gameAlerts: document.getElementById('gameAlerts').checked,
+                newsAlerts: document.getElementById('newsAlerts').checked,
+                scoreAlerts: document.getElementById('scoreAlerts').checked
+            };
+
+            try {
+                const response = await fetch('/api/user/preferences', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify(preferences)
+                });
+
+                if (response.ok) {
+                    alert('Preferences saved successfully');
+                }
+            } catch (error) {
+                console.error('Error saving preferences:', error);
+                alert('Failed to save preferences');
+            }
+        });
+
+        function logout() {
+            localStorage.removeItem('token');
+            window.location.href = '/';
+        }
+
+        // Load profile on page load
+        loadProfile();
+    </script>
+</body>
+</html>

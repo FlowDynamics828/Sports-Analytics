@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard - Sports Analytics Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="/dashboard/styles/dashboard.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        (function checkAuth() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.replace('/login');
+                return;
+            }
+
+            fetch('/api/user/profile', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Invalid token');
+                return response.json();
+            })
+            .catch(() => {
+                localStorage.clear();
+                window.location.replace('/login');
+            });
+        })();
+    </script>
+    <style>
+        .stat-card {
+            transition: transform 0.2s ease-in-out;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .loading {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-white min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 p-4 fixed w-full z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-8">
+                <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
+                <div class="flex space-x-4">
+                   <select id="leagueSelect" class="bg-gray-700 text-white p-2 rounded">
+    <option value="nba">NBA</option>
+    <option value="nfl">NFL</option>
+    <option value="mlb">MLB</option>
+    <option value="nhl">NHL</option>
+    <option value="premierleague">Premier League</option>
+    <option value="laliga">La Liga</option>
+    <option value="bundesliga">Bundesliga</option>
+    <option value="seriea">Serie A</option>
+</select>
+                    </select>
+                    <select id="teamSelect" class="bg-gray-700 text-white p-2 rounded">
+                        <option value="">Select Team</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="userSubscription" class="px-3 py-1 bg-blue-600 rounded-full text-sm"></span>
+                <a href="/profile" class="hover:text-blue-400">Profile</a>
+                <a href="/preferences" class="hover:text-blue-400">Preferences</a>
+                <div class="flex items-center">
+                    <span id="connectionStatus" class="text-green-500 mr-2">●</span>
+                    <span id="connectionText" class="text-sm">Connected</span>
+                </div>
+                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700 transition-colors">
+                    Logout
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="pt-20 pb-8">
+        <div class="container mx-auto px-4">
+            <!-- Welcome Section -->
+            <div class="mb-8">
+                <h1 class="text-3xl font-bold mb-2">Welcome, <span id="welcomeName">User</span>!</h1>
+                <p class="text-gray-400">Here's your sports analytics overview</p>
+            </div>
+
+            <!-- Stats Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="bg-gray-800 p-6 rounded-lg stat-card">
+                    <h3 class="text-lg font-bold mb-2">Total Games</h3>
+                    <p id="totalGames" class="text-3xl font-bold text-blue-500">-</p>
+                    <p class="text-gray-400 text-sm mt-2">Last 7 days</p>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg stat-card">
+                    <h3 class="text-lg font-bold mb-2">Average Score</h3>
+                    <p id="avgScore" class="text-3xl font-bold text-blue-500">-</p>
+                    <p class="text-gray-400 text-sm mt-2">Points per game</p>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg stat-card">
+                    <h3 class="text-lg font-bold mb-2">Home Win Rate</h3>
+                    <p id="winRate" class="text-3xl font-bold text-blue-500">-</p>
+                    <p class="text-gray-400 text-sm mt-2">Home team advantage</p>
+                </div>
+            </div>
+
+            <!-- Charts Section -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="bg-gray-800 p-6 rounded-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold">Recent Games</h2>
+                        <select id="gamesFilter" class="bg-gray-700 text-white p-2 rounded text-sm">
+                            <option value="5">Last 5 games</option>
+                            <option value="10">Last 10 games</option>
+                            <option value="20">Last 20 games</option>
+                        </select>
+                    </div>
+                    <div id="recentGames" class="space-y-4 max-h-[500px] overflow-y-auto"></div>
+                </div>
+                <div class="bg-gray-800 p-6 rounded-lg">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-xl font-bold">Performance Trend</h2>
+                        <select id="chartType" class="bg-gray-700 text-white p-2 rounded text-sm">
+                            <option value="score">Scores</option>
+                            <option value="differential">Point Differential</option>
+                        </select>
+                    </div>
+                    <div class="h-[500px]">
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-gray-900/50 flex items-center justify-center hidden">
+        <div class="bg-gray-800 p-6 rounded-lg">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p class="text-center mt-4">Loading data...</p>
+        </div>
+    </div>
+
+    <script>
+        function verifyAuth() {
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.replace('/login');
+                return;
+            }
+
+            fetch('/api/user/profile', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Authentication failed');
+                return response.json();
+            })
+            .then(userData => {
+                document.getElementById('welcomeName').textContent = userData.email.split('@')[0];
+                document.getElementById('userSubscription').textContent = 
+                    userData.subscription.charAt(0).toUpperCase() + userData.subscription.slice(1);
+            })
+            .catch(() => {
+                localStorage.clear();
+                window.location.replace('/login');
+            });
+        }
+
+        const originalFetch = window.fetch;
+        window.fetch = function(url, options = {}) {
+            const token = localStorage.getItem('token');
+            if (token) {
+                options.headers = {
+                    ...options.headers,
+                    'Authorization': `Bearer ${token}`
+                };
+            }
+            return originalFetch(url, options);
+        };
+
+        function logout() {
+            localStorage.clear();
+            window.location.replace('/login');
+        }
+
+        verifyAuth();
+    </script>
+
+    <script type="module" src="/dashboard/scripts/dataService.js"></script>
+<script type="module" src="/dashboard/scripts/dashboard.js"></script>
+</body>
+</html>
