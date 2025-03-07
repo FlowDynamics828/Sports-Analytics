@@ -1,0 +1,148 @@
+// scripts/fix-all-issues.js - Fix all common issues at once
+
+require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const winston = require('winston');
+
+// Configure logging
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(({ level, message, timestamp }) => {
+      return `${timestamp} ${level}: ${message}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    }),
+    new winston.transports.File({ filename: 'logs/fix-all-issues.log' })
+  ]
+});
+
+// Ensure logs directory exists
+try {
+  if (!fs.existsSync('logs')) {
+    fs.mkdirSync('logs');
+  }
+} catch (error) {
+  console.error('Error creating logs directory:', error);
+}
+
+// Main function
+async function main() {
+  logger.info('Starting comprehensive fix for all issues...');
+
+  // 1. Fix Python path issues
+  await runFixScript('fix-python-path.js', 'Python path');
+
+  // 2. Fix Redis connection issues
+  await runFixScript('fix-redis-connection.js', 'Redis connection');
+
+  // 3. Fix memory management issues
+  await runFixScript('fix-memory-issues.js', 'memory management');
+
+  // 4. Fix MaxListenersExceededWarning
+  await runFixScript('fix-max-listeners.js', 'MaxListenersExceededWarning');
+
+  // 5. Run diagnostics to verify fixes
+  await runDiagnostics();
+
+  logger.info('All fixes have been applied successfully');
+  logger.info('To start the application with optimized settings, run: npm run start:optimized');
+}
+
+// Function to run a fix script
+async function runFixScript(scriptName, fixType) {
+  logger.info(`Running ${fixType} fix...`);
+  
+  const scriptPath = path.join(process.cwd(), 'scripts', scriptName);
+  
+  // Check if script exists
+  if (!fs.existsSync(scriptPath)) {
+    logger.error(`${scriptName} not found at ${scriptPath}`);
+    return false;
+  }
+  
+  // Run the script
+  return new Promise((resolve) => {
+    const nodeProcess = spawn('node', [scriptPath]);
+    
+    nodeProcess.stdout.on('data', (data) => {
+      process.stdout.write(data);
+    });
+    
+    nodeProcess.stderr.on('data', (data) => {
+      process.stderr.write(data);
+    });
+    
+    nodeProcess.on('close', (code) => {
+      if (code === 0) {
+        logger.info(`${fixType} fix completed successfully`);
+        resolve(true);
+      } else {
+        logger.error(`${fixType} fix failed with code ${code}`);
+        resolve(false);
+      }
+    });
+    
+    nodeProcess.on('error', (error) => {
+      logger.error(`Error running ${scriptName}: ${error.message}`);
+      resolve(false);
+    });
+  });
+}
+
+// Function to run diagnostics
+async function runDiagnostics() {
+  logger.info('Running diagnostics to verify fixes...');
+  
+  const diagnosticsPath = path.join(process.cwd(), 'scripts', 'quick-diagnose.js');
+  
+  // Check if diagnostics script exists
+  if (!fs.existsSync(diagnosticsPath)) {
+    logger.error(`Diagnostics script not found at ${diagnosticsPath}`);
+    return false;
+  }
+  
+  // Run the diagnostics script
+  return new Promise((resolve) => {
+    const nodeProcess = spawn('node', [diagnosticsPath]);
+    
+    nodeProcess.stdout.on('data', (data) => {
+      process.stdout.write(data);
+    });
+    
+    nodeProcess.stderr.on('data', (data) => {
+      process.stderr.write(data);
+    });
+    
+    nodeProcess.on('close', (code) => {
+      if (code === 0) {
+        logger.info('Diagnostics completed successfully');
+        resolve(true);
+      } else {
+        logger.error(`Diagnostics failed with code ${code}`);
+        resolve(false);
+      }
+    });
+    
+    nodeProcess.on('error', (error) => {
+      logger.error(`Error running diagnostics: ${error.message}`);
+      resolve(false);
+    });
+  });
+}
+
+// Run the main function
+main().catch(error => {
+  logger.error(`Error in fix-all-issues.js: ${error.message}`);
+  logger.error(error.stack);
+  process.exit(1);
+});

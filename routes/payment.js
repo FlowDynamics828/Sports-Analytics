@@ -1,7 +1,8 @@
 // routes/payment.js
 const express = require('express');
 const router = express.Router();
-const stripe = require('../stripe-config');
+const stripe = require('../config/stripe-config');
+const { authenticate } = require('../auth/authMiddleware');
 
 // Define price IDs from your Stripe dashboard
 const PRICE_IDS = {
@@ -10,7 +11,7 @@ const PRICE_IDS = {
     enterprise: 'price_enterprise_live_99_99'
 };
 
-router.post('/create-subscription', async (req, res) => {
+router.post('/create-subscription', authenticate, async (req, res) => {
     try {
         const { email, paymentMethodId, subscription } = req.body;
         const priceId = PRICE_IDS[subscription];

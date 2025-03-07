@@ -1,0 +1,548 @@
+// scripts/fix-redis-connection.js - Script to fix Redis connection issues
+
+require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { execSync } = require('child_process');
+const readline = require('readline');
+const winston = require('winston');
+const { spawn } = require('child_process');
+let Redis;
+
+try {
+  Redis = require('ioredis');
+} catch (error) {
+  console.warn('ioredis module not found. Will skip Redis connection tests.');
+}
+
+// ANSI color codes for better readability
+const colors = {
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m'
+};
+
+// Configure logging
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.printf(({ level, message, timestamp }) => {
+      return `${timestamp} ${level}: ${message}`;
+    })
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    })
+  ]
+});
+
+// Ensure logs directory exists
+try {
+  if (!fs.existsSync('logs')) {
+    fs.mkdirSync('logs');
+    logger.add(new winston.transports.File({ filename: 'logs/fix-redis-connection.log' }));
+  } else {
+    logger.add(new winston.transports.File({ filename: 'logs/fix-redis-connection.log' }));
+  }
+} catch (error) {
+  console.error('Error creating logs directory:', error);
+}
+
+// Print header
+console.log(`${colors.bright}${colors.cyan}Sports Analytics - Redis Connection Fix Tool${colors.reset}`);
+console.log(`${colors.cyan}=============================================${colors.reset}\n`);
+
+// Create readline interface for user input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+// Function to check Redis connection
+async function checkRedisConnection() {
+  console.log(`${colors.bright}Checking Redis Connection:${colors.reset}`);
+  logger.info('Checking Redis connection...');
+  
+  const redisHost = process.env.REDIS_HOST || 'localhost';
+  const redisPort = parseInt(process.env.REDIS_PORT, 10) || 6379;
+  const redisPassword = process.env.REDIS_PASSWORD || '';
+  
+  console.log(`  Redis host: ${redisHost}`);
+  console.log(`  Redis port: ${redisPort}`);
+  console.log(`  Redis password: ${redisPassword ? '(set)' : '(not set)'}`);
+  
+  if (!Redis) {
+    console.log(`  ${colors.yellow}ioredis module not installed. Skipping connection test.${colors.reset}`);
+    logger.warn('ioredis module not installed. Skipping connection test.');
+    return false;
+  }
+  
+  try {
+    const redis = new Redis({
+      host: redisHost,
+      port: redisPort,
+      password: redisPassword,
+      connectTimeout: 5000,
+      maxRetriesPerRequest: 1
+    });
+    
+    return new Promise((resolve) => {
+      redis.on('ready', () => {
+        console.log(`  Redis connection: ${colors.green}OK${colors.reset}`);
+        logger.info('Redis connection successful');
+        redis.quit();
+        resolve(true);
+      });
+      
+      redis.on('error', (error) => {
+        console.log(`  Redis connection: ${colors.red}FAILED${colors.reset}`);
+        console.log(`  Error: ${error.message}`);
+        logger.error(`Redis connection failed: ${error.message}`);
+        redis.quit();
+        resolve(false);
+      });
+      
+      // Set timeout
+      setTimeout(() => {
+        console.log(`  Redis connection: ${colors.red}TIMEOUT${colors.reset}`);
+        logger.error('Redis connection timed out');
+        redis.disconnect();
+        resolve(false);
+      }, 5000);
+    });
+  } catch (error) {
+    console.log(`  Redis check: ${colors.red}ERROR${colors.reset}`);
+    console.log(`  Error: ${error.message}`);
+    logger.error(`Error checking Redis: ${error.message}`);
+    return false;
+  }
+}
+
+// Function to update .env file with in-memory cache setting
+async function enableInMemoryCache() {
+  console.log(`\n${colors.bright}Enabling In-Memory Cache Fallback:${colors.reset}`);
+  logger.info('Enabling in-memory cache fallback...');
+  
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    
+    // Check if .env file exists
+    if (!fs.existsSync(envPath)) {
+      console.log(`  ${colors.yellow}.env file not found. Creating new file.${colors.reset}`);
+      fs.writeFileSync(envPath, 'USE_IN_MEMORY_CACHE=true\n');
+      console.log(`  ${colors.green}Created .env file with in-memory cache enabled.${colors.reset}`);
+      logger.info('Created .env file with in-memory cache enabled');
+      return true;
+    }
+    
+    // Read existing .env file
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    let updated = false;
+    
+    // Update USE_IN_MEMORY_CACHE
+    if (envContent.includes('USE_IN_MEMORY_CACHE=')) {
+      const currentValue = envContent.match(/USE_IN_MEMORY_CACHE=(.*)(\r?\n|$)/)[1];
+      if (currentValue !== 'true') {
+        envContent = envContent.replace(/USE_IN_MEMORY_CACHE=.*(\r?\n|$)/, 'USE_IN_MEMORY_CACHE=true$1');
+        updated = true;
+      } else {
+        console.log(`  ${colors.green}In-memory cache already enabled in .env file.${colors.reset}`);
+        logger.info('In-memory cache already enabled in .env file');
+      }
+    } else {
+      envContent += '\nUSE_IN_MEMORY_CACHE=true';
+      updated = true;
+    }
+    
+    // Write updated content back to .env file if changes were made
+    if (updated) {
+      fs.writeFileSync(envPath, envContent);
+      console.log(`  ${colors.green}Updated .env file to enable in-memory cache.${colors.reset}`);
+      logger.info('Updated .env file to enable in-memory cache');
+    }
+    
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
+    logger.error(`Error updating .env file: ${error.message}`);
+    return false;
+  }
+}
+
+// Function to check if Redis is installed
+function checkRedisInstallation() {
+  console.log(`\n${colors.bright}Checking Redis Installation:${colors.reset}`);
+  logger.info('Checking Redis installation...');
+  
+  try {
+    if (process.platform === 'win32') {
+      // Windows - check if Redis is installed via WSL or Windows port
+      try {
+        execSync('redis-cli -v');
+        console.log(`  Redis CLI: ${colors.green}INSTALLED${colors.reset}`);
+        logger.info('Redis CLI is installed on Windows');
+        return true;
+      } catch (e) {
+        console.log(`  Redis CLI: ${colors.red}NOT FOUND${colors.reset}`);
+        console.log(`  Redis may not be installed or not in PATH.`);
+        logger.warn('Redis CLI not found on Windows');
+        return false;
+      }
+    } else {
+      // Unix-like systems
+      try {
+        const output = execSync('redis-cli -v').toString();
+        console.log(`  Redis CLI: ${colors.green}${output.trim()}${colors.reset}`);
+        logger.info(`Redis CLI version: ${output.trim()}`);
+        
+        // Check if Redis server is running
+        try {
+          execSync('redis-cli ping');
+          console.log(`  Redis server: ${colors.green}RUNNING${colors.reset}`);
+          logger.info('Redis server is running');
+          return true;
+        } catch (e) {
+          console.log(`  Redis server: ${colors.red}NOT RUNNING${colors.reset}`);
+          logger.warn('Redis server is not running');
+          return false;
+        }
+      } catch (e) {
+        console.log(`  Redis CLI: ${colors.red}NOT FOUND${colors.reset}`);
+        console.log(`  Redis may not be installed.`);
+        logger.warn('Redis CLI not found on Unix-like system');
+        return false;
+      }
+    }
+  } catch (error) {
+    console.log(`  Redis installation check: ${colors.red}ERROR${colors.reset}`);
+    console.log(`  Error: ${error.message}`);
+    logger.error(`Error checking Redis installation: ${error.message}`);
+    return false;
+  }
+}
+
+// Function to ask if user wants to install Redis
+function askToInstallRedis() {
+  return new Promise((resolve) => {
+    rl.question(`\n${colors.yellow}Would you like to install Redis? (y/n):\n${colors.reset}`, (input) => {
+      const answer = input.trim().toLowerCase() === 'y';
+      logger.info(`User chose to ${answer ? 'install' : 'not install'} Redis`);
+      resolve(answer);
+    });
+  });
+}
+
+// Function to install Redis
+async function installRedis() {
+  console.log(`\n${colors.bright}Installing Redis:${colors.reset}`);
+  logger.info('Attempting to install Redis...');
+  
+  try {
+    if (process.platform === 'win32') {
+      console.log(`  ${colors.yellow}Redis installation on Windows requires manual steps:${colors.reset}`);
+      console.log(`  1. Download Redis for Windows from https://github.com/microsoftarchive/redis/releases`);
+      console.log(`  2. Install and start the Redis service`);
+      console.log(`  3. Alternatively, use WSL (Windows Subsystem for Linux) to run Redis`);
+      console.log(`\n  ${colors.yellow}For now, we'll enable in-memory cache as a fallback.${colors.reset}`);
+      logger.info('Provided instructions for manual Redis installation on Windows');
+      return false;
+    } else if (process.platform === 'darwin') {
+      // macOS
+      console.log(`  Installing Redis via Homebrew...`);
+      logger.info('Installing Redis via Homebrew on macOS');
+      execSync('brew install redis', { stdio: 'inherit' });
+      console.log(`  Starting Redis service...`);
+      execSync('brew services start redis', { stdio: 'inherit' });
+      console.log(`  ${colors.green}Redis installed and started successfully.${colors.reset}`);
+      logger.info('Redis installed and started successfully on macOS');
+      return true;
+    } else {
+      // Linux
+      console.log(`  Installing Redis...`);
+      logger.info('Installing Redis on Linux');
+      execSync('sudo apt-get update && sudo apt-get install -y redis-server', { stdio: 'inherit' });
+      console.log(`  Starting Redis service...`);
+      execSync('sudo systemctl enable redis-server && sudo systemctl start redis-server', { stdio: 'inherit' });
+      console.log(`  ${colors.green}Redis installed and started successfully.${colors.reset}`);
+      logger.info('Redis installed and started successfully on Linux');
+      return true;
+    }
+  } catch (error) {
+    console.log(`  ${colors.red}Error installing Redis: ${error.message}${colors.reset}`);
+    console.log(`  ${colors.yellow}Enabling in-memory cache as a fallback.${colors.reset}`);
+    logger.error(`Error installing Redis: ${error.message}`);
+    return false;
+  }
+}
+
+// Function to update Redis connection settings in .env
+async function updateRedisSettings() {
+  console.log(`\n${colors.bright}Updating Redis Connection Settings:${colors.reset}`);
+  logger.info('Updating Redis connection settings...');
+  
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    
+    // Check if .env file exists
+    if (!fs.existsSync(envPath)) {
+      console.log(`  ${colors.yellow}.env file not found. Cannot update Redis settings.${colors.reset}`);
+      logger.warn('.env file not found. Cannot update Redis settings.');
+      return false;
+    }
+    
+    // Read existing .env file
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    
+    // Update Redis settings
+    const settings = {
+      'REDIS_HOST': 'localhost',
+      'REDIS_PORT': '6379',
+      'REDIS_CONNECT_TIMEOUT': '30000',
+      'REDIS_ENABLE_OFFLINE_QUEUE': 'true',
+      'REDIS_MAX_RETRIES': '5',
+      'REDIS_RETRY_STRATEGY_MAX_DELAY': '5000'
+    };
+    
+    let updated = false;
+    
+    // Add Redis Configuration header if it doesn't exist
+    if (!envContent.includes('# Redis Configuration')) {
+      envContent += '\n# Redis Configuration\n';
+      updated = true;
+    }
+    
+    for (const [key, value] of Object.entries(settings)) {
+      if (envContent.includes(`${key}=`)) {
+        const currentValue = envContent.match(new RegExp(`${key}=(.*)(\r?\n|$)`))[1];
+        if (currentValue !== value) {
+          envContent = envContent.replace(new RegExp(`${key}=.*(\r?\n|$)`), `${key}=${value}$1`);
+          updated = true;
+        }
+      } else {
+        envContent += `${key}=${value}\n`;
+        updated = true;
+      }
+    }
+    
+    // Write updated content back to .env file if changes were made
+    if (updated) {
+      fs.writeFileSync(envPath, envContent);
+      console.log(`  ${colors.green}Updated Redis connection settings in .env file.${colors.reset}`);
+      logger.info('Updated Redis connection settings in .env file');
+    } else {
+      console.log(`  ${colors.green}Redis connection settings already optimal in .env file.${colors.reset}`);
+      logger.info('Redis connection settings already optimal in .env file');
+    }
+    
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Error updating Redis settings: ${error.message}${colors.reset}`);
+    logger.error(`Error updating Redis settings: ${error.message}`);
+    return false;
+  }
+}
+
+// Function to fix Redis cleanup in api.js
+async function fixRedisCleanup() {
+  console.log(`\n${colors.bright}Checking for Redis cleanup issues in api.js:${colors.reset}`);
+  logger.info('Checking for Redis cleanup issues in api.js...');
+  
+  try {
+    const apiPath = path.join(process.cwd(), 'api.js');
+    if (!fs.existsSync(apiPath)) {
+      console.log(`  ${colors.yellow}api.js not found. Skipping Redis cleanup fix.${colors.reset}`);
+      logger.warn('api.js not found. Skipping Redis cleanup fix.');
+      return false;
+    }
+    
+    let apiContent = fs.readFileSync(apiPath, 'utf8');
+    
+    // Check if TheAnalyzerPredictiveModel.cleanup method exists
+    if (!apiContent.includes('async cleanup()')) {
+      console.log(`  ${colors.yellow}TheAnalyzerPredictiveModel.cleanup method not found in api.js${colors.reset}`);
+      logger.warn('TheAnalyzerPredictiveModel.cleanup method not found in api.js');
+      return false;
+    }
+    
+    // Find the Redis cleanup section
+    const redisCleanupStart = apiContent.indexOf('// Enhanced Redis connection cleanup');
+    
+    if (redisCleanupStart === -1) {
+      console.log(`  ${colors.yellow}Redis cleanup section not found in api.js${colors.reset}`);
+      logger.warn('Redis cleanup section not found in api.js');
+      return false;
+    }
+    
+    // Find the end of the Redis cleanup section
+    const redisCleanupEnd = apiContent.indexOf('if (this.cache)', redisCleanupStart);
+    
+    if (redisCleanupEnd === -1) {
+      console.log(`  ${colors.yellow}Could not find the end of Redis cleanup section in api.js${colors.reset}`);
+      logger.warn('Could not find the end of Redis cleanup section in api.js');
+      return false;
+    }
+    
+    // Replace the Redis cleanup section with improved code
+    const improvedRedisCleanup = `      // Enhanced Redis connection cleanup with better error handling and connection state management
+      if (this.redis) {
+        try {
+          // Check Redis connection status before attempting to close
+          const redisStatus = this.redis.status || 'unknown';
+          logger.info(\`Redis connection status before cleanup: \${redisStatus}\`, {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+
+          // Handle different connection states appropriately
+          if (redisStatus === 'ready' || redisStatus === 'connect') {
+            // Use a timeout to prevent hanging on quit
+            const quitPromise = this.redis.quit();
+            const timeoutPromise = new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('Redis quit timeout')), 5000)
+            );
+
+            await Promise.race([quitPromise, timeoutPromise])
+              .then(() => {
+                logger.info('Redis connection closed gracefully', {
+                  metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+                });
+              })
+              .catch(error => {
+                logger.warn(\`Redis quit timed out or failed: \${error.message}, forcing disconnect\`, {
+                  metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+                });
+                // Force disconnect if quit fails or times out
+                if (this.redis && typeof this.redis.disconnect === 'function') {
+                  this.redis.disconnect();
+                }
+              });
+          } else if (redisStatus === 'end' || redisStatus === 'close') {
+            logger.info('Redis connection already closed, no action needed', {
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+            });
+          } else {
+            // For any other status, force disconnect to be safe
+            logger.info(\`Redis in \${redisStatus} state, forcing disconnect\`, {
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+            });
+            if (typeof this.redis.disconnect === 'function') {
+              this.redis.disconnect();
+            }
+          }
+
+          // Remove all event listeners to prevent memory leaks
+          if (this.redis.removeAllListeners) {
+            this.redis.removeAllListeners();
+            logger.info('Removed all Redis event listeners', {
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+            });
+          }
+        } catch (redisError) {
+          // Don't throw error if Redis cleanup fails, just log it
+          logger.warn('Error during Redis connection cleanup:', {
+            error: redisError.message,
+            stack: redisError.stack,
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+        } finally {
+          // Ensure Redis references are cleared regardless of success/failure
+          this.redis = null;
+
+          // Also clear the global Redis client if it exists
+          if (global.redisClient) {
+            global.redisClient = null;
+            logger.info('Cleared global Redis client reference', {
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+            });
+          }
+        }
+      }
+
+      `;
+    
+    apiContent = apiContent.slice(0, redisCleanupStart) + improvedRedisCleanup + apiContent.slice(redisCleanupEnd);
+    
+    fs.writeFileSync(apiPath, apiContent);
+    console.log(`  ${colors.green}Updated Redis cleanup in TheAnalyzerPredictiveModel.cleanup method${colors.reset}`);
+    logger.info('Updated Redis cleanup in TheAnalyzerPredictiveModel.cleanup method');
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Error fixing Redis cleanup: ${error.message}${colors.reset}`);
+    logger.error(`Error fixing Redis cleanup: ${error.message}`);
+    return false;
+  }
+}
+
+// Main function
+async function main() {
+  logger.info('Starting Redis connection fix...');
+  
+  // 1. Check Redis connection
+  const redisConnected = await checkRedisConnection();
+  
+  // 2. If Redis is not connected, check if it's installed
+  if (!redisConnected) {
+    const redisInstalled = checkRedisInstallation();
+    
+    // 3. If Redis is not installed, ask if user wants to install it
+    if (!redisInstalled) {
+      const installRedisAnswer = await askToInstallRedis();
+      
+      if (installRedisAnswer) {
+        // 4. Install Redis
+        const redisInstallSuccess = await installRedis();
+        
+        if (!redisInstallSuccess) {
+          // 5. If Redis installation failed, enable in-memory cache
+          await enableInMemoryCache();
+        }
+      } else {
+        // 6. If user doesn't want to install Redis, enable in-memory cache
+        await enableInMemoryCache();
+      }
+    } else {
+      // 7. If Redis is installed but not connected, update Redis settings
+      await updateRedisSettings();
+    }
+  }
+  
+  // 8. Fix Redis cleanup in api.js
+  await fixRedisCleanup();
+  
+  // 9. Final check
+  const finalRedisConnected = await checkRedisConnection();
+  
+  if (!finalRedisConnected) {
+    // 10. If Redis is still not connected, ensure in-memory cache is enabled
+    await enableInMemoryCache();
+  }
+  
+  console.log(`\n${colors.bright}${colors.green}Redis connection fix completed!${colors.reset}`);
+  console.log(`\n${colors.cyan}Next steps:${colors.reset}`);
+  console.log(`1. Run ${colors.bright}npm start${colors.reset} to start your application`);
+  console.log(`2. If you still encounter issues, run ${colors.bright}npm run diagnose:full${colors.reset} for detailed diagnostics`);
+  
+  rl.close();
+  logger.info('Redis connection fix completed successfully');
+}
+
+// Run the main function
+main().catch(error => {
+  console.error(`\n${colors.red}Error during Redis connection fix:${colors.reset} ${error.message}`);
+  console.error(error.stack);
+  logger.error(`Error in fix-redis-connection.js: ${error.message}`);
+  logger.error(error.stack);
+  rl.close();
+  process.exit(1);
+});

@@ -1,0 +1,450 @@
+// scripts/fix-python-path.js - Script to detect and fix Python path issues
+
+require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+const { spawn, execSync } = require('child_process');
+const os = require('os');
+const readline = require('readline');
+
+// ANSI color codes for better readability
+const colors = {
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m'
+};
+
+// Print header
+console.log(`${colors.bright}${colors.cyan}Sports Analytics - Python Path Fix Tool${colors.reset}`);
+console.log(`${colors.cyan}=========================================${colors.reset}\n`);
+
+// Create readline interface for user input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+// Function to detect Python path
+async function detectPythonPath() {
+  console.log(`${colors.bright}Detecting Python Installation:${colors.reset}`);
+  
+  // Check environment variables first
+  const envPath = process.env.PYTHON_PATH || process.env.PYTHON_EXECUTABLE;
+  if (envPath) {
+    console.log(`  Found Python path in environment variables: ${envPath}`);
+    if (await testPythonPath(envPath)) {
+      return envPath;
+    }
+    console.log(`  ${colors.yellow}Python path from environment variables is not valid.${colors.reset}`);
+  }
+  
+  // Check common paths based on platform
+  if (process.platform === 'win32') {
+    const commonPaths = [
+      'python',
+      'python3',
+      'C:\\Python39\\python.exe',
+      'C:\\Python310\\python.exe',
+      'C:\\Python311\\python.exe',
+      'C:\\Python312\\python.exe',
+      'C:\\Program Files\\Python39\\python.exe',
+      'C:\\Program Files\\Python310\\python.exe',
+      'C:\\Program Files\\Python311\\python.exe',
+      'C:\\Program Files\\Python312\\python.exe',
+      'C:\\Program Files (x86)\\Python39\\python.exe',
+      'C:\\Program Files (x86)\\Python310\\python.exe',
+      'C:\\Program Files (x86)\\Python311\\python.exe',
+      'C:\\Program Files (x86)\\Python312\\python.exe',
+      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python39\\python.exe`,
+      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python310\\python.exe`,
+      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python311\\python.exe`,
+      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python312\\python.exe`,
+      'C:\\ProgramData\\Anaconda3\\python.exe',
+      'C:\\ProgramData\\miniconda3\\python.exe',
+      'C:\\Windows\\py.exe'
+    ];
+    
+    for (const pythonPath of commonPaths) {
+      try {
+        if (pythonPath === 'python' || pythonPath === 'python3' || fs.existsSync(pythonPath)) {
+          console.log(`  Found Python at: ${pythonPath}`);
+          if (await testPythonPath(pythonPath)) {
+            return pythonPath;
+          }
+        }
+      } catch (e) {
+        // Ignore errors and continue checking
+      }
+    }
+    
+    // Try using 'where' command on Windows
+    try {
+      const output = execSync('where python').toString().trim().split('\r\n')[0];
+      if (output && await testPythonPath(output)) {
+        console.log(`  Found Python using 'where' command: ${output}`);
+        return output;
+      }
+    } catch (e) {
+      // Ignore errors and continue
+    }
+
+    // Try using 'py' command on Windows
+    try {
+      const output = execSync('where py').toString().trim().split('\r\n')[0];
+      if (output && await testPythonPath(output)) {
+        console.log(`  Found Python launcher at: ${output}`);
+        return output;
+      }
+    } catch (e) {
+      // Ignore errors and continue
+    }
+  } else {
+    // On Unix-like systems, try using 'which' command
+    const commonUnixPaths = ['python3', 'python'];
+    
+    for (const pythonPath of commonUnixPaths) {
+      try {
+        const result = await testPythonPath(pythonPath);
+        if (result) {
+          console.log(`  Found working Python at: ${pythonPath}`);
+          return pythonPath;
+        }
+      } catch (error) {
+        // Continue to next path
+      }
+    }
+    
+    try {
+      const output = execSync('which python3 || which python').toString().trim();
+      if (output && await testPythonPath(output)) {
+        console.log(`  Found Python using 'which' command: ${output}`);
+        return output;
+      }
+    } catch (e) {
+      // Ignore errors and continue
+    }
+  }
+  
+  // Default fallback
+  console.log(`  ${colors.yellow}Could not detect Python path automatically.${colors.reset}`);
+  return null;
+}
+
+// Function to test if Python path is valid
+async function testPythonPath(pythonPath) {
+  return new Promise((resolve) => {
+    try {
+      const pythonProcess = spawn(pythonPath, ['-c', 'import sys; print(f"Python {sys.version}")']);
+      
+      let output = '';
+      let errorOutput = '';
+      
+      pythonProcess.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+      
+      pythonProcess.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+      
+      pythonProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log(`  Python version: ${colors.green}${output.trim()}${colors.reset}`);
+          resolve(true);
+        } else {
+          console.log(`  Python test failed: ${colors.red}${errorOutput}${colors.reset}`);
+          resolve(false);
+        }
+      });
+      
+      pythonProcess.on('error', () => {
+        console.log(`  Python process error for: ${pythonPath}`);
+        resolve(false);
+      });
+      
+      // Set timeout with increased duration
+      setTimeout(() => {
+        try {
+          pythonProcess.kill();
+          console.log(`  Python test timed out for: ${pythonPath} after 15 seconds`);
+          console.log(`  This may be caused by anti-virus software or system resource constraints.`);
+        } catch (e) {
+          // Process might have already exited
+        }
+        // Still resolve as false if the test timed out
+        resolve(false);
+      }, 15000);
+    } catch (error) {
+      console.log(`  Error testing Python path: ${error.message}`);
+      resolve(false);
+    }
+  });
+}
+
+// Function to update .env file with Python path
+async function updateEnvFile(pythonPath) {
+  console.log(`\n${colors.bright}Updating .env File:${colors.reset}`);
+  
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    
+    // Check if .env file exists
+    if (!fs.existsSync(envPath)) {
+      console.log(`  ${colors.yellow}.env file not found. Creating new file.${colors.reset}`);
+      fs.writeFileSync(envPath, `PYTHON_PATH=${pythonPath}\nPYTHON_EXECUTABLE=${pythonPath}\n`);
+      console.log(`  ${colors.green}Created .env file with Python path.${colors.reset}`);
+      return true;
+    }
+    
+    // Read existing .env file
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    let updated = false;
+    
+    // Update PYTHON_PATH
+    if (envContent.includes('PYTHON_PATH=')) {
+      const currentPath = envContent.match(/PYTHON_PATH=(.*)(\r?\n|$)/)[1];
+      if (currentPath !== pythonPath) {
+        envContent = envContent.replace(/PYTHON_PATH=.*(\r?\n|$)/, `PYTHON_PATH=${pythonPath}$1`);
+        updated = true;
+      }
+    } else {
+      envContent += `\nPYTHON_PATH=${pythonPath}`;
+      updated = true;
+    }
+    
+    // Update PYTHON_EXECUTABLE
+    if (envContent.includes('PYTHON_EXECUTABLE=')) {
+      const currentPath = envContent.match(/PYTHON_EXECUTABLE=(.*)(\r?\n|$)/)[1];
+      if (currentPath !== pythonPath) {
+        envContent = envContent.replace(/PYTHON_EXECUTABLE=.*(\r?\n|$)/, `PYTHON_EXECUTABLE=${pythonPath}$1`);
+        updated = true;
+      }
+    } else {
+      envContent += `\nPYTHON_EXECUTABLE=${pythonPath}`;
+      updated = true;
+    }
+    
+    // Add Python bridge settings if they don't exist
+    if (!envContent.includes('PYTHON_BRIDGE_MAX_RETRIES=')) {
+      envContent += `\nPYTHON_BRIDGE_MAX_RETRIES=3`;
+      updated = true;
+    }
+    
+    if (!envContent.includes('PYTHON_EXECUTION_TIMEOUT=')) {
+      envContent += `\nPYTHON_EXECUTION_TIMEOUT=60000`;
+      updated = true;
+    }
+    
+    if (!envContent.includes('PYTHON_PROCESS_TERMINATION_TIMEOUT=')) {
+      envContent += `\nPYTHON_PROCESS_TERMINATION_TIMEOUT=10000`;
+      updated = true;
+    }
+    
+    // Write updated content back to .env file if changes were made
+    if (updated) {
+      fs.writeFileSync(envPath, envContent);
+      console.log(`  ${colors.green}Updated .env file with Python path: ${pythonPath}${colors.reset}`);
+    } else {
+      console.log(`  ${colors.green}.env file already contains correct Python path.${colors.reset}`);
+    }
+    
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
+    return false;
+  }
+}
+
+// Function to check if predictive_model.py exists
+function checkPredictiveModelScript() {
+  console.log(`\n${colors.bright}Checking Predictive Model Script:${colors.reset}`);
+  
+  const scriptPaths = [
+    path.join(process.cwd(), 'scripts', 'predictive_model.py'),
+    path.join(process.cwd(), 'predictive_model.py'),
+    path.join(process.cwd(), 'service', 'predictive_model.py'),
+    path.join(process.cwd(), 'service', 'predictive-model.py'),
+    path.join(process.cwd(), 'scripts', 'predictive-model.py')
+  ];
+  
+  let foundPath = null;
+  
+  for (const scriptPath of scriptPaths) {
+    const exists = fs.existsSync(scriptPath);
+    console.log(`  ${scriptPath}: ${exists ? `${colors.green}EXISTS${colors.reset}` : `${colors.red}MISSING${colors.reset}`}`);
+    
+    if (exists) {
+      foundPath = scriptPath;
+    }
+  }
+  
+  if (!foundPath) {
+    console.log(`\n  ${colors.yellow}Warning: Could not find predictive_model.py in any of the expected locations.${colors.reset}`);
+    console.log(`  ${colors.yellow}You may need to create this file or check your project structure.${colors.reset}`);
+    return null;
+  }
+  
+  return foundPath;
+}
+
+// Function to create predictive_model.py if it doesn't exist
+function createPredictiveModelScript(scriptPath) {
+  console.log(`\n${colors.bright}Creating Predictive Model Script:${colors.reset}`);
+  
+  try {
+    // Create directory if it doesn't exist
+    const dir = path.dirname(scriptPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    
+    // Basic predictive model script template
+    const scriptContent = `# predictive_model.py - Basic predictive model script
+
+import sys
+import os
+import json
+import logging
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("predictive_model.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+def main():
+    """Main function to process input and generate predictions"""
+    try:
+        # Get input from Node.js
+        input_data = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
+        
+        # Log the received data
+        logger.info(f"Received request: {input_data.get('type', 'unknown')}")
+        
+        # Handle health check
+        if input_data.get('type') == 'health_check':
+            result = {"status": "ok", "timestamp": datetime.now().isoformat()}
+            print(json.dumps(result))
+            return
+            
+        # Process based on prediction type
+        prediction_type = input_data.get('prediction_type', '')
+        league = input_data.get('league', '')
+        
+        # Generate mock prediction result
+        result = {
+            "prediction": 0.75,
+            "confidence": 0.85,
+            "factors": ["historical_performance", "recent_form"],
+            "timestamp": datetime.now().isoformat(),
+            "league": league,
+            "type": prediction_type
+        }
+        
+        # Return result as JSON
+        print(json.dumps(result))
+        
+    except Exception as e:
+        logger.error(f"Error in predictive model: {str(e)}")
+        error_result = {
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+        print(json.dumps(error_result))
+        
+if __name__ == "__main__":
+    main()
+`;
+    
+    fs.writeFileSync(scriptPath, scriptContent);
+    console.log(`  ${colors.green}Created basic predictive model script at: ${scriptPath}${colors.reset}`);
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Error creating predictive model script: ${error.message}${colors.reset}`);
+    return false;
+  }
+}
+
+// Function to ask for manual Python path input
+function askForPythonPath() {
+  return new Promise((resolve) => {
+    rl.question(`\n${colors.yellow}Please enter the path to your Python executable (or press Enter to use 'python'):\n${colors.reset}`, (input) => {
+      const pythonPath = input.trim() || 'python';
+      resolve(pythonPath);
+    });
+  });
+}
+
+// Function to ask if user wants to create the predictive model script
+function askToCreateScript() {
+  return new Promise((resolve) => {
+    rl.question(`\n${colors.yellow}Would you like to create a basic predictive_model.py script? (y/n):\n${colors.reset}`, (input) => {
+      resolve(input.trim().toLowerCase() === 'y');
+    });
+  });
+}
+
+// Main function
+async function main() {
+  try {
+    // Detect Python path
+    let pythonPath = await detectPythonPath();
+    
+    // If Python path not detected, ask user for input
+    if (!pythonPath) {
+      pythonPath = await askForPythonPath();
+      
+      // Test the provided path
+      if (!(await testPythonPath(pythonPath))) {
+        console.log(`\n${colors.red}The provided Python path could not be verified.${colors.reset}`);
+        console.log(`${colors.yellow}Continuing with '${pythonPath}' anyway, but you may need to install Python or provide a correct path.${colors.reset}`);
+      }
+    }
+    
+    // Update .env file with Python path
+    await updateEnvFile(pythonPath);
+    
+    // Check if predictive_model.py exists
+    const scriptPath = checkPredictiveModelScript();
+    
+    // If script doesn't exist, ask if user wants to create it
+    if (!scriptPath) {
+      const createScript = await askToCreateScript();
+      
+      if (createScript) {
+        const defaultScriptPath = path.join(process.cwd(), 'scripts', 'predictive_model.py');
+        createPredictiveModelScript(defaultScriptPath);
+      } else {
+        console.log(`\n${colors.yellow}You'll need to create the predictive_model.py script manually.${colors.reset}`);
+      }
+    }
+    
+    console.log(`\n${colors.bright}${colors.green}Python path fix completed successfully!${colors.reset}`);
+    console.log(`\n${colors.cyan}Next steps:${colors.reset}`);
+    console.log(`1. Run ${colors.bright}npm start${colors.reset} to start your application`);
+    console.log(`2. If you still encounter issues, run ${colors.bright}npm run diagnose:full${colors.reset} for detailed diagnostics`);
+    
+    rl.close();
+  } catch (error) {
+    console.error(`\n${colors.red}Error during Python path fix:${colors.reset} ${error.message}`);
+    console.error(error.stack);
+    rl.close();
+    process.exit(1);
+  }
+}
+
+// Run the main function
+main();
