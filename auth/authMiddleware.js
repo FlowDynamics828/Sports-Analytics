@@ -1225,3 +1225,28 @@ module.exports = {
     requireAuth,
     requireAdmin
 };
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM signal received: closing HTTP server');
+  server.close(async () => {
+    console.log('HTTP server closed');
+    
+    // Close Redis connection
+    try {
+      await redisClient.quit();
+      console.log('Redis connection closed');
+    } catch (error) {
+      console.error('Error closing Redis connection:', error);
+    }
+
+    // Close MongoDB connection
+    try {
+      await mongoClient.close();
+      console.log('MongoDB connection closed');
+    } catch (error) {
+      console.error('Error closing MongoDB connection:', error);
+    }
+
+    process.exit(0);
+  });
+});

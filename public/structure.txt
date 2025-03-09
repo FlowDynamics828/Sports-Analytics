@@ -1,4 +1,4 @@
- Volume in drive C is Windows
+Volume in drive C is Windows
  Volume Serial Number is 0290-0D8E
 
  Directory of C:\Users\d07ch\OneDrive\Desktop\Sports Analytics\sports-analytics\public
@@ -8,10 +8,9 @@
 12/31/2024  07:39 AM             8,361 dashboard.html
 12/31/2024  07:37 AM            16,853 index.html
 12/31/2024  07:39 AM             6,464 preferences.html
-12/31/2024  11:34 AM                 0 structure.txt
 12/31/2024  07:40 AM             4,792 visualization.html
-               5 File(s)         36,470 bytes
+               4 File(s)         36,470 bytes
 
      Total Files Listed:
-               5 File(s)         36,470 bytes
+               4 File(s)         36,470 bytes
                2 Dir(s)  830,981,394,432 bytes free

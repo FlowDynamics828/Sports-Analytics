@@ -138,6 +138,24 @@ If you encounter issues with Python integration:
    node test-mongodb.js
    ```
 
+### MongoDB Connection Issues
+
+If you encounter MongoDB connection errors:
+
+1. Ensure MongoDB is running and accessible at the specified URI in your `.env` file.
+2. Verify the connection string in your `.env` file:
+   ```
+   MONGODB_URI=mongodb://localhost:27017/sports-analytics
+   ```
+3. Check network connectivity to the MongoDB server:
+   ```bash
+   ping localhost
+   ```
+4. Review the logs for detailed error messages:
+   ```
+   logs/startup.log
+   ```
+
 ### Redis Connection Issues
 
 1. Ensure Redis is running:

@@ -3,6 +3,49 @@ const { MongoClient } = require('mongodb');
 const { StatsCalculator, TeamStatsTracker } = require('./statsCalculator');
 const _ = require('lodash');
 
+// Player stats schema definition
+const playerStatsSchema = {
+  playerId: String,      // Player ID
+  playerName: String,    // Player Name
+  teamId: String,        // Team ID
+  gameId: String,        // Game ID for reference
+  league: String,        // League (NFL, NBA, etc.)
+  date: Date,            // Game date
+  season: String,        // Season identifier
+  
+  // Common stats across sports
+  minutesPlayed: Number,
+  gamesPlayed: Number,
+  
+  // Sport-specific stats stored in a flexible structure
+  stats: {
+    // Basketball stats
+    points: Number,
+    rebounds: Number,
+    assists: Number,
+    steals: Number,
+    blocks: Number,
+    
+    // Football stats
+    passingYards: Number,
+    rushingYards: Number,
+    touchdowns: Number,
+    
+    // Baseball stats
+    hits: Number,
+    runs: Number,
+    rbi: Number,
+    
+    // Soccer stats
+    goals: Number,
+    assists: Number,
+    shots: Number
+  },
+  
+  // Advanced metrics
+  advancedMetrics: {}
+};
+
 class DatabaseManager {
   constructor(config) {
     this.client = null;
@@ -23,6 +66,9 @@ class DatabaseManager {
       retryReads: true,
       serverApi: { version: '1', strict: true, deprecationErrors: true }
     };
+    
+    // Make schema available on the instance
+    this.playerStatsSchema = playerStatsSchema;
   }
 
   async initialize() {
@@ -33,10 +79,43 @@ class DatabaseManager {
       // Perform any additional initialization
       const db = this.client.db(this.config.name);
       
-      // Create any necessary indexes or collections
+      // Create any necessary indexes or collections for existing data
       await db.collection('users').createIndex({ email: 1 }, { unique: true });
       await db.collection('games').createIndex({ date: 1 });
       await db.collection('stats').createIndex({ teamId: 1 });
+      
+      // Add player stats collections and indexes for each league
+      const SUPPORTED_LEAGUES = [
+        'NFL', 'NBA', 'MLB', 'NHL',
+        'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
+      ];
+      
+      for (const league of SUPPORTED_LEAGUES) {
+        const collectionName = `${league.toLowerCase()}_player_stats`;
+        
+        try {
+          // Create collection if it doesn't exist
+          await db.createCollection(collectionName);
+          console.log(`Created ${collectionName} collection`);
+        } catch (error) {
+          // Collection may already exist, which is fine
+          if (error.code !== 48) { // 48 is "NamespaceExists" error
+            console.warn(`Warning creating ${collectionName}: ${error.message}`);
+          }
+        }
+        
+        // Create indexes for player stats collection
+        await db.collection(collectionName).createIndex({ playerId: 1 });
+        await db.collection(collectionName).createIndex({ gameId: 1 });
+        await db.collection(collectionName).createIndex({ teamId: 1 });
+        await db.collection(collectionName).createIndex({ date: -1 });
+        await db.collection(collectionName).createIndex({ 
+          playerId: 1, 
+          date: -1 
+        }, { name: "player_date_lookup" });
+        
+        console.log(`Created indexes for ${collectionName}`);
+      }
       
       return true;
     } catch (error) {
@@ -45,10 +124,6 @@ class DatabaseManager {
   }
 
   async connect() {
-    if (this.client) {
-      return this.client;
-    }
-
     if (this.connecting) {
       return new Promise((resolve, reject) => {
         this.waitingPromises.push({ resolve, reject });
@@ -127,6 +202,96 @@ class DatabaseManager {
     return this.client.db(this.config.name)
       .collection(collection)
       .updateOne(filter, update, options);
+  }
+
+  // Player stats specific methods
+  async savePlayerStats(league, playerStats) {
+    await this.connect();
+    const collectionName = `${league.toLowerCase()}_player_stats`;
+    
+    // Validate stats against schema
+    const validatedStats = this._validateAgainstSchema(playerStats);
+    
+    return this.client.db(this.config.name)
+      .collection(collectionName)
+      .insertOne(validatedStats);
+  }
+  
+  async getPlayerStats(league, playerId, options = {}) {
+    await this.connect();
+    const collectionName = `${league.toLowerCase()}_player_stats`;
+    
+    const query = { playerId };
+    if (options.gameId) query.gameId = options.gameId;
+    if (options.season) query.season = options.season;
+    if (options.dateRange) {
+      query.date = {
+        $gte: options.dateRange.start,
+        $lte: options.dateRange.end
+      };
+    }
+    
+    const sort = options.sort || { date: -1 };
+    const limit = options.limit || 0;
+    
+    return this.client.db(this.config.name)
+      .collection(collectionName)
+      .find(query)
+      .sort(sort)
+      .limit(limit)
+      .toArray();
+  }
+  
+  async updatePlayerStats(league, playerId, gameId, updates) {
+    await this.connect();
+    const collectionName = `${league.toLowerCase()}_player_stats`;
+    
+    // Ensure updates only contain valid fields
+    const validUpdates = {};
+    for (const field in updates) {
+      if (field in this.playerStatsSchema) {
+        if (field === 'stats' || field === 'advancedMetrics') {
+          validUpdates[field] = {};
+          for (const statField in updates[field]) {
+            if (statField in this.playerStatsSchema[field]) {
+              validUpdates[field][statField] = updates[field][statField];
+            }
+          }
+        } else {
+          validUpdates[field] = updates[field];
+        }
+      }
+    }
+    
+    return this.client.db(this.config.name)
+      .collection(collectionName)
+      .updateOne(
+        { playerId, gameId },
+        { $set: validUpdates }
+      );
+  }
+  
+  _validateAgainstSchema(playerStats) {
+    // Create a new object with only fields from the schema
+    const validated = {};
+    
+    for (const field in this.playerStatsSchema) {
+      if (playerStats.hasOwnProperty(field)) {
+        if (field === 'stats' || field === 'advancedMetrics') {
+          // Handle nested objects
+          validated[field] = {};
+          for (const statField in this.playerStatsSchema[field]) {
+            if (playerStats[field] && playerStats[field].hasOwnProperty(statField)) {
+              validated[field][statField] = playerStats[field][statField];
+            }
+          }
+        } else {
+          validated[field] = playerStats[field];
+        }
+      }
+    }
+    
+    return validated;
   }
 
   async getTeamStats(teamId) {
@@ -221,5 +386,5 @@ class DatabaseManager {
   }
 }
 
-// Export the DatabaseManager class
-module.exports = { DatabaseManager };
+// Export the DatabaseManager class and the player stats schema
+module.exports = { DatabaseManager, playerStatsSchema };

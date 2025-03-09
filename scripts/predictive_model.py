@@ -146,14 +146,18 @@ class PredictionRequest:
     factors: Optional[List[Dict]] = None
 
 class MemoryMonitor:
-    def __init__(self, threshold_mb: int = 2000):  # Increased threshold to 2GB
+    def __init__(self, threshold_mb: int = 800):  # Reduced threshold to 800MB
         self.threshold_mb = threshold_mb
         self.process = psutil.Process()
         self.consecutive_checks = 0  # Track consecutive high memory detections
         self.last_check_time = time.time()
-        self.check_interval = 300  # Check at most every 5 minutes
+        self.check_interval = 60  # Check more frequently - every 1 minute
         self.last_gc_time = 0
-        self.gc_interval = 1800  # Allow GC at most every 30 minutes
+        self.gc_interval = 300  # Allow GC more frequently - every 5 minutes
+
+        # Initialize with a garbage collection
+        gc.collect()
+        logger.info(f"Initial garbage collection performed during startup")
 
     def check_memory(self) -> bool:
         # Rate limit checks to reduce overhead
@@ -170,21 +174,36 @@ class MemoryMonitor:
             # Only log at debug level to reduce noise
             logger.debug(f"Memory usage: {memory_mb:.1f}MB (threshold: {self.threshold_mb}MB)")
 
-            if memory_info.rss > self.threshold_mb * 1024 * 1024:
+            # More aggressive memory management
+            if memory_mb > self.threshold_mb:
                 self.consecutive_checks += 1
 
-                # Only log and collect garbage if:
-                # 1. We've seen high memory multiple times
-                # 2. We haven't collected garbage recently
-                if (self.consecutive_checks >= 5 and
-                    current_time - self.last_gc_time > self.gc_interval):
-
-                    # Perform garbage collection
-                    gc.collect()
+                # Perform garbage collection more aggressively
+                if current_time - self.last_gc_time > self.gc_interval:
+                    # Run full garbage collection with all generations
+                    gc.collect(2)
                     self.last_gc_time = current_time
+
+                    # Clear any large objects in memory
+                    self._clear_caches()
 
                     logger.warning(f'High memory usage detected ({memory_mb:.1f}MB), triggered garbage collection')
                     self.consecutive_checks = 0  # Reset after collection
+
+                # If memory is critically high, take more drastic measures
+                if memory_mb > self.threshold_mb * 1.5:
+                    logger.error(f'Critical memory usage detected ({memory_mb:.1f}MB), performing emergency cleanup')
+                    gc.collect(2)  # Force collection of all generations
+                    self._clear_caches()
+
+                    # Try to reduce memory pressure by clearing module caches
+                    for module_name in list(sys.modules.keys()):
+                        if module_name not in ('os', 'sys', 'gc', 'time', 'logging', 'psutil'):
+                            if module_name in sys.modules:
+                                try:
+                                    del sys.modules[module_name]
+                                except:
+                                    pass
 
                 return True
             else:
@@ -193,6 +212,23 @@ class MemoryMonitor:
         except Exception as e:
             logger.error(f"Memory check failed: {str(e)}")
             return False
+
+    def _clear_caches(self):
+        """Clear any caches to free memory"""
+        # Clear pandas cache if it exists
+        if hasattr(pd, '_libs') and hasattr(pd._libs, 'hashtable'):
+            if hasattr(pd._libs.hashtable, '_clear_caches'):
+                pd._libs.hashtable._clear_caches()
+
+        # Clear numpy cache if it exists
+        if hasattr(np, 'core') and hasattr(np.core, '_multiarray_umath'):
+            if hasattr(np.core._multiarray_umath, '_clear_caches'):
+                np.core._multiarray_umath._clear_caches()
+
+        # Clear any large global variables that might be cached
+        for name in list(globals().keys()):
+            if name.startswith('_cache_') or name.endswith('_cache'):
+                globals()[name] = None
 
 class CircuitBreaker:
     def __init__(self, failure_threshold: int = 3, reset_timeout: int = 120):  # Reduced failure threshold
@@ -282,29 +318,56 @@ class TheAnalyzerPredictiveModel:
         self.circuit_breaker = CircuitBreaker(failure_threshold=3, reset_timeout=120)  # Adjusted for stability
         self.memory_monitor = MemoryMonitor(threshold_mb=800)
 
-        # MongoDB connection
+        # MongoDB connection with reduced pool size and timeouts
         mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/sports-analytics')
-        self.client = pymongo.MongoClient(mongodb_uri, 
-                                         maxPoolSize=int(os.getenv('DB_MAX_POOL_SIZE', 50)),  # Reduced
-                                         minPoolSize=int(os.getenv('DB_MIN_POOL_SIZE', 10)),  # Reduced
-                                         connectTimeoutMS=int(os.getenv('CONNECT_TIMEOUT_MS', 30000)),
-                                         socketTimeoutMS=int(os.getenv('SOCKET_TIMEOUT_MS', 45000)))
+        self.client = pymongo.MongoClient(mongodb_uri,
+                                         maxPoolSize=int(os.getenv('DB_MAX_POOL_SIZE', 10)),  # Further reduced
+                                         minPoolSize=int(os.getenv('DB_MIN_POOL_SIZE', 1)),   # Minimum pool size
+                                         connectTimeoutMS=int(os.getenv('CONNECT_TIMEOUT_MS', 5000)),  # Reduced timeout
+                                         socketTimeoutMS=int(os.getenv('SOCKET_TIMEOUT_MS', 10000)),  # Reduced timeout
+                                         serverSelectionTimeoutMS=5000,  # Added server selection timeout
+                                         waitQueueTimeoutMS=1000,        # Added wait queue timeout
+                                         retryWrites=True,               # Enable retry writes
+                                         w=1)                            # Reduced write concern
         self.db = self.client[os.getenv('MONGODB_DB_NAME', 'sports-analytics')]
         self._verify_mongodb_connection()
 
-        # Redis connection
-        redis_host = os.getenv('REDIS_HOST', 'localhost')
-        redis_port = int(os.getenv('REDIS_PORT', 6379))
-        redis_password = os.getenv('REDIS_PASSWORD', '')
-        self.redis_client = redis.Redis(
-            host=redis_host,
-            port=redis_port,
-            password=redis_password,
-            decode_responses=True,
-            socket_timeout=int(os.getenv('REDIS_CONNECT_TIMEOUT', 10000)),
-            retry_on_timeout=True,
-            max_connections=10  # Reduced to lower resource usage
-        )
+        # Redis connection with optimized settings
+        try:
+            redis_host = os.getenv('REDIS_HOST', 'localhost')
+            redis_port = int(os.getenv('REDIS_PORT', 6379))
+            redis_password = os.getenv('REDIS_PASSWORD', '')
+
+            # Check if Redis is enabled
+            use_redis = os.getenv('USE_REDIS', 'true').lower() == 'true'
+
+            if use_redis:
+                self.redis_client = redis.Redis(
+                    host=redis_host,
+                    port=redis_port,
+                    password=redis_password,
+                    decode_responses=True,
+                    socket_timeout=int(os.getenv('REDIS_CONNECT_TIMEOUT', 3000)),  # Reduced timeout
+                    socket_connect_timeout=2000,  # Added connect timeout
+                    retry_on_timeout=True,
+                    health_check_interval=30,  # Added health check
+                    max_connections=5,  # Further reduced connections
+                    client_name='predictive_model_py'  # Added client name for tracking
+                )
+
+                # Test connection with timeout
+                try:
+                    self.redis_client.ping()
+                    logger.info("Redis connection successful")
+                except (redis.ConnectionError, redis.TimeoutError) as e:
+                    logger.warning(f"Redis connection failed: {str(e)}. Using in-memory cache.")
+                    self.redis_client = None
+            else:
+                logger.info("Redis disabled by configuration. Using in-memory cache.")
+                self.redis_client = None
+        except Exception as e:
+            logger.error(f"Error initializing Redis: {str(e)}")
+            self.redis_client = None
 
         # Initialize monitoring with reduced frequency
         self._start_monitoring()
@@ -898,6 +961,34 @@ class TheAnalyzerPredictiveModel:
         
         return False
 
+    def _prepare_player_stats_data(self, player_id, league):
+        """Prepare player statistics data for models"""
+        try:
+            collection_name = f"{league.lower()}_player_stats"
+            collection = self.db[collection_name]
+
+            # Get recent player games
+            player_games = list(collection.find(
+                {'playerId': player_id},
+                sort=[('date', -1)],
+                limit=20  # Use last 20 games
+            ))
+
+            if not player_games:
+                raise ValueError(f"No statistics found for player {player_id}")
+
+            # Transform into DataFrame for analysis
+            df = pd.DataFrame(player_games)
+
+            # Extract relevant features based on sport
+            features = self._extract_player_features(df, league)
+
+            return features
+
+        except Exception as e:
+            logger.error(f"Error preparing player stats: {str(e)}")
+            raise
+
     def _prepare_training_data(self, league, limit=500):
         """Prepare training data for a specific league, synchronously with reduced dataset size"""
         try:
@@ -1226,3 +1317,29 @@ if __name__ == "__main__":
             "type": type(e).__name__
         }))
         sys.exit(1)
+
+import time
+import redis
+
+def connect_to_redis():
+    retries = 5
+    while retries > 0:
+        try:
+            client = redis.StrictRedis(host='localhost', port=6379, db=0)
+            client.ping()
+            logger.info("Connected to Redis")
+            return client
+        except redis.ConnectionError as e:
+            logger.error(f"Redis connection failed: {e}")
+            retries -= 1
+            time.sleep(5)
+    logger.error("Failed to connect to Redis after multiple attempts")
+    return None
+
+redis_client = connect_to_redis()
+
+if not redis_client:
+    logger.error("Exiting script due to Redis connection failure")
+    exit(1)
+
+redis_client = connect_to_redis()

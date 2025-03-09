@@ -26,16 +26,17 @@ const logger = winston.createLogger({
 
 class CacheManager {
   constructor(options = {}) {
-    // Use .env settings with defaults
-    const cacheTTL = parseInt(process.env.CACHE_TTL, 10) || 1800; // 30 minutes from .env
-    const cacheCheckPeriod = parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 300; // 5 minutes from .env
-    const cacheMaxItems = parseInt(process.env.CACHE_MAX_ITEMS, 10) || 500; // 500 items from .env
+    // Use .env settings with defaults - with more conservative values
+    const cacheTTL = parseInt(process.env.CACHE_TTL, 10) || 900; // 15 minutes default (reduced from 30)
+    const cacheCheckPeriod = parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 120; // 2 minutes default (reduced from 5)
+    const cacheMaxItems = parseInt(process.env.CACHE_MAX_ITEMS, 10) || 200; // 200 items default (reduced from 500)
 
     this.cache = new NodeCache({
-      stdTTL: cacheTTL, // Use .env value
-      checkperiod: cacheCheckPeriod, // Use .env value
-      useClones: false,
-      maxKeys: cacheMaxItems, // Limit in-memory cache size
+      stdTTL: cacheTTL,
+      checkperiod: cacheCheckPeriod,
+      useClones: false, // Keep this for memory efficiency
+      maxKeys: cacheMaxItems,
+      deleteOnExpire: true, // Ensure items are deleted when they expire
       ...options
     });
 
@@ -48,7 +49,8 @@ class CacheManager {
       misses: 0,
       keys: 0,
       redisHits: 0,
-      redisMisses: 0
+      redisMisses: 0,
+      lastCleanup: Date.now()
     };
 
     // Create middleware function as a class method
@@ -57,14 +59,37 @@ class CacheManager {
     // Initialize asynchronously in constructor
     this.initialized = false;
 
+    // Track large values to identify potential memory issues
+    this.largeValueThreshold = 50 * 1024; // 50KB
+    this.largeValues = new Map();
+
     // Add memory usage check with automatic cleanup
     this.checkMemoryUsage = () => {
       const memoryUsage = process.memoryUsage();
-      const memoryThreshold = parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.80; // Match .env threshold
+      const memoryThreshold = parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.70; // Lower threshold (from 0.80)
       const currentUsage = memoryUsage.heapUsed / memoryUsage.heapTotal;
 
+      // Log memory usage at debug level to avoid excessive logging
+      if (process.env.LOG_LEVEL === 'debug') {
+        logger.debug(`CacheManager memory usage: ${Math.round(currentUsage * 100)}% of heap used`, {
+          heapUsed: Math.round(memoryUsage.heapUsed / (1024 * 1024)) + 'MB',
+          heapTotal: Math.round(memoryUsage.heapTotal / (1024 * 1024)) + 'MB',
+          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+        });
+      }
+
+      // Perform periodic cleanup regardless of memory pressure (every 10 minutes)
+      const now = Date.now();
+      if (now - this.stats.lastCleanup > 600000) { // 10 minutes
+        this.performPeriodicCleanup();
+        this.stats.lastCleanup = now;
+      }
+
+      // More aggressive cleanup when memory usage is high
       if (currentUsage > memoryThreshold) {
         logger.warn(`High memory usage detected in CacheManager: ${Math.round(currentUsage * 100)}% of heap used`, {
+          heapUsed: Math.round(memoryUsage.heapUsed / (1024 * 1024)) + 'MB',
+          heapTotal: Math.round(memoryUsage.heapTotal / (1024 * 1024)) + 'MB',
           metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
         });
 
@@ -81,8 +106,120 @@ class CacheManager {
       }
     };
 
-    // Set up memory check interval - reduced frequency to avoid overhead
-    this.memoryCheckInterval = setInterval(this.checkMemoryUsage, 300000); // Check every 5 minutes
+    // Set up memory check interval - check more frequently when under memory pressure
+    this.memoryCheckInterval = setInterval(this.checkMemoryUsage,
+      currentUsage => currentUsage > 0.75 ? 60000 : 180000); // Check every 1 or 3 minutes based on memory pressure
+
+    // Initial memory check after a short delay
+    setTimeout(() => this.checkMemoryUsage(), 5000);
+
+    this.lastOptimizationTime = 0; // Track last optimization time
+  }
+
+  /**
+   * Perform periodic cleanup of cache regardless of memory pressure
+   * @private
+   */
+  performPeriodicCleanup() {
+    try {
+      const keys = this.cache.keys();
+      if (keys.length === 0) return;
+
+      logger.info(`Performing periodic cache cleanup, current keys: ${keys.length}`, {
+        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+      });
+
+      // Check for large values that might be causing memory issues
+      this.identifyLargeValues();
+
+      // If we have too many keys, remove the oldest 10%
+      if (keys.length > 100) {
+        const keysToRemove = Math.ceil(keys.length * 0.1);
+        logger.info(`Removing ${keysToRemove} oldest keys during periodic cleanup`, {
+          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+        });
+
+        // Get key stats to find oldest keys
+        const keyStats = keys.map(key => {
+          const stats = this.cache.getTtl(key);
+          return { key, ttl: stats };
+        });
+
+        // Sort by TTL (ascending) and remove oldest keys
+        keyStats.sort((a, b) => a.ttl - b.ttl);
+        const oldestKeys = keyStats.slice(0, keysToRemove).map(item => item.key);
+
+        // Delete the oldest keys
+        oldestKeys.forEach(key => this.cache.del(key));
+      }
+    } catch (error) {
+      logger.error(`Error during periodic cache cleanup: ${error.message}`, {
+        stack: error.stack,
+        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+      });
+    }
+  }
+
+  /**
+   * Identify large values in cache that might be causing memory issues
+   * @private
+   */
+  identifyLargeValues() {
+    try {
+      const keys = this.cache.keys();
+      this.largeValues.clear();
+
+      for (const key of keys) {
+        const value = this.cache.get(key);
+        if (!value) continue;
+
+        // Estimate size of value
+        let size = 0;
+        try {
+          const jsonString = JSON.stringify(value);
+          size = jsonString.length;
+        } catch (e) {
+          // If we can't stringify, use a rough estimate
+          size = 1000;
+        }
+
+        if (size > this.largeValueThreshold) {
+          this.largeValues.set(key, size);
+        }
+      }
+
+      // Log large values if there are any
+      if (this.largeValues.size > 0) {
+        const largeValuesList = Array.from(this.largeValues.entries())
+          .map(([key, size]) => `${key}: ${Math.round(size / 1024)}KB`)
+          .join(', ');
+
+        logger.warn(`Found ${this.largeValues.size} large values in cache: ${largeValuesList}`, {
+          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+        });
+
+        // If we have too many large values, remove some of them
+        if (this.largeValues.size > 5) {
+          const largeValuesArray = Array.from(this.largeValues.entries());
+          largeValuesArray.sort((a, b) => b[1] - a[1]); // Sort by size descending
+
+          // Remove the largest values
+          const keysToRemove = largeValuesArray.slice(0, Math.ceil(largeValuesArray.length / 2))
+            .map(([key]) => key);
+
+          logger.info(`Removing ${keysToRemove.length} large values from cache`, {
+            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+          });
+
+          keysToRemove.forEach(key => this.cache.del(key));
+        }
+      }
+    } catch (error) {
+      logger.error(`Error identifying large cache values: ${error.message}`, {
+        stack: error.stack,
+        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+      });
+    }
   }
 
   /**
@@ -383,8 +520,20 @@ class CacheManager {
    */
   async performMemoryOptimization(currentUsage, threshold) {
     try {
-      // Limit optimization frequency to prevent thrashing
       const now = Date.now();
+      const cooldownPeriod = 300000; // 5 minutes cooldown period
+
+      if (now - this.lastOptimizationTime < cooldownPeriod) {
+        logger.info('Skipping cache optimization - cooldown period active', {
+          timeSinceLastOptimization: `${Math.round((now - this.lastOptimizationTime) / 1000)}s`,
+          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+        });
+        return;
+      }
+
+      this.lastOptimizationTime = now;
+
+      // Limit optimization frequency to prevent thrashing
       if (this._lastOptimization && (now - this._lastOptimization) < 60000) { // Only optimize once per minute max
         logger.info('Skipping cache optimization - already optimized recently', {
           timeSinceLastOptimization: `${Math.round((now - this._lastOptimization) / 1000)}s`,
@@ -664,6 +813,17 @@ class CacheManager {
         metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
       });
       // Don't throw the error, just log it to prevent blocking shutdown
+    }
+  }
+
+  /**
+   * Clear cache with error handling
+   */
+  async clearCache() {
+    try {
+      // Clear cache logic
+    } catch (error) {
+      logger.error('Cache clear error:', error);
     }
   }
 }

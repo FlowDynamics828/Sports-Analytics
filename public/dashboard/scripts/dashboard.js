@@ -1,4 +1,742 @@
-let selectedTeam = '';
+// dashboard.js - Optimized dashboard implementation
+'use strict';
+
+// Cache DOM elements to avoid repeated queries
+const elements = {
+    leagueSelect: document.getElementById('leagueSelect'),
+    teamSelect: document.getElementById('teamSelect'),
+    totalGames: document.getElementById('totalGames'),
+    avgScore: document.getElementById('avgScore'),
+    winRate: document.getElementById('winRate'),
+    recentGames: document.getElementById('recentGames'),
+    performanceChart: document.getElementById('performanceChart'),
+    gamesFilter: document.getElementById('gamesFilter'),
+    chartType: document.getElementById('chartType'),
+    loadingOverlay: document.getElementById('loadingOverlay'),
+    connectionStatus: document.getElementById('connectionStatus'),
+    connectionText: document.getElementById('connectionText')
+};
+
+// State management
+const state = {
+    games: [],
+    teams: [],
+    selectedLeague: 'nba',
+    selectedTeam: '',
+    gamesLimit: 5,
+    chartType: 'score',
+    isLoading: false,
+    chart: null,
+    connectionStatus: 'connected',
+    lastUpdate: null
+};
+
+// Initialize dashboard
+function initDashboard() {
+    // Set up event listeners
+    elements.leagueSelect.addEventListener('change', handleLeagueChange);
+    elements.teamSelect.addEventListener('change', handleTeamChange);
+    elements.gamesFilter.addEventListener('change', handleGamesFilterChange);
+    elements.chartType.addEventListener('change', handleChartTypeChange);
+    
+    // Initial data load
+    loadLeagueData();
+    
+    // Set up periodic refresh (every 60 seconds)
+    setInterval(refreshData, 60000);
+    
+    // Set up connection status check
+    setInterval(checkConnection, 30000);
+}
+
+// Event handlers
+function handleLeagueChange(e) {
+    state.selectedLeague = e.target.value;
+    state.selectedTeam = '';
+    elements.teamSelect.innerHTML = '<option value="">Select Team</option>';
+    loadLeagueData();
+}
+
+function handleTeamChange(e) {
+    state.selectedTeam = e.target.value;
+    refreshData();
+}
+
+function handleGamesFilterChange(e) {
+    state.gamesLimit = parseInt(e.target.value, 10);
+    updateRecentGames();
+    updateChart();
+}
+
+function handleChartTypeChange(e) {
+    state.chartType = e.target.value;
+    updateChart();
+}
+
+// Data loading functions
+function loadLeagueData() {
+    setLoading(true);
+    updateConnectionStatus('connecting');
+    
+    fetch(`/api/leagues/${state.selectedLeague}`)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load league data');
+            return response.json();
+        })
+        .then(data => {
+            state.teams = data.teams || [];
+            populateTeamSelect();
+            loadGameData();
+            updateConnectionStatus('connected');
+        })
+        .catch(error => {
+            console.error('Error loading league data:', error);
+            updateConnectionStatus('error');
+            setLoading(false);
+        });
+}
+
+function loadGameData() {
+    setLoading(true);
+    
+    const endpoint = state.selectedTeam 
+        ? `/api/games/${state.selectedLeague}/${state.selectedTeam}`
+        : `/api/games/${state.selectedLeague}`;
+    
+    fetch(endpoint)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load game data');
+            return response.json();
+        })
+        .then(data => {
+            // Process and store game data
+            state.games = Array.isArray(data) ? data : [];
+            state.lastUpdate = new Date();
+            
+            // Update UI components
+            updateStats();
+            updateRecentGames();
+            updateChart();
+            
+            setLoading(false);
+        })
+        .catch(error => {
+            console.error('Error loading game data:', error);
+            state.games = [];
+            updateStats();
+            updateRecentGames();
+            updateChart();
+            setLoading(false);
+        });
+}
+
+function refreshData() {
+    // Only refresh if not already loading
+    if (!state.isLoading) {
+        loadGameData();
+    }
+}
+
+// UI update functions
+function populateTeamSelect() {
+    // Clear existing options except the default
+    elements.teamSelect.innerHTML = '<option value="">All Teams</option>';
+    
+    // Add team options
+    state.teams.forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.id;
+        option.textContent = team.name;
+        elements.teamSelect.appendChild(option);
+    });
+}
+
+function updateStats() {
+    const games = state.games;
+    
+    // Update total games
+    elements.totalGames.textContent = games.length;
+    
+    // Calculate average score
+    if (games.length > 0) {
+        const totalHomeScore = games.reduce((sum, game) => sum + (game.homeTeam?.score || 0), 0);
+        const totalAwayScore = games.reduce((sum, game) => sum + (game.awayTeam?.score || 0), 0);
+        const avgScore = (totalHomeScore + totalAwayScore) / (games.length * 2);
+        elements.avgScore.textContent = avgScore.toFixed(1);
+        
+        // Calculate home win rate
+        const homeWins = games.filter(game => (game.homeTeam?.score || 0) > (game.awayTeam?.score || 0)).length;
+        const winRate = (homeWins / games.length) * 100;
+        elements.winRate.textContent = winRate.toFixed(1) + '%';
+    } else {
+        elements.avgScore.textContent = '-';
+        elements.winRate.textContent = '-';
+    }
+}
+
+function updateRecentGames() {
+    const container = elements.recentGames;
+    const games = state.games.slice(0, state.gamesLimit);
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    if (games.length === 0) {
+        container.innerHTML = '<div class="text-center p-4">No games found</div>';
+        return;
+    }
+    
+    // Create game elements
+    games.forEach(game => {
+        const gameElement = document.createElement('div');
+        gameElement.className = 'bg-gray-700 p-4 rounded hover:bg-gray-600 transition-colors mb-4';
+        
+        const gameDate = new Date(game.date).toLocaleDateString();
+        
+        gameElement.innerHTML = `
+            <div class="flex justify-between items-center">
+                <div class="text-lg">
+                    <div class="font-bold">${game.homeTeam?.name || 'Home Team'}</div>
+                    <div class="text-2xl">${game.homeTeam?.score || '0'}</div>
+                </div>
+                <div class="text-gray-400 mx-4">VS</div>
+                <div class="text-lg text-right">
+                    <div class="font-bold">${game.awayTeam?.name || 'Away Team'}</div>
+                    <div class="text-2xl">${game.awayTeam?.score || '0'}</div>
+                </div>
+            </div>
+            <div class="text-sm text-gray-400 mt-2">${gameDate}</div>
+        `;
+        
+        container.appendChild(gameElement);
+    });
+}
+
+function updateChart() {
+    const canvas = elements.performanceChart;
+    const games = state.games.slice(0, state.gamesLimit);
+    
+    // Destroy existing chart if it exists
+    if (state.chart) {
+        state.chart.destroy();
+    }
+    
+    if (games.length === 0) {
+        return;
+    }
+    
+    // Prepare data based on chart type
+    const labels = games.map(game => new Date(game.date).toLocaleDateString());
+    let datasets = [];
+    
+    if (state.chartType === 'score') {
+        datasets = [
+            {
+                label: 'Home Score',
+                data: games.map(game => game.homeTeam?.score || 0),
+                borderColor: 'rgba(59, 130, 246, 1)',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                tension: 0.1
+            },
+            {
+                label: 'Away Score',
+                data: games.map(game => game.awayTeam?.score || 0),
+                borderColor: 'rgba(239, 68, 68, 1)',
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                tension: 0.1
+            }
+        ];
+    } else {
+        // Point differential
+        datasets = [
+            {
+                label: 'Point Differential',
+                data: games.map(game => (game.homeTeam?.score || 0) - (game.awayTeam?.score || 0)),
+                borderColor: 'rgba(16, 185, 129, 1)',
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                tension: 0.1
+            }
+        ];
+    }
+    
+    // Create new chart
+    state.chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: state.chartType === 'differential',
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    ticks: {
+                        color: 'rgba(255, 255, 255, 0.7)'
+                    }
+                },
+                x: {
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    ticks: {
+                        color: 'rgba(255, 255, 255, 0.7)'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: {
+                        color: 'rgba(255, 255, 255, 0.7)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Utility functions
+function setLoading(isLoading) {
+    state.isLoading = isLoading;
+    elements.loadingOverlay.style.display = isLoading ? 'flex' : 'none';
+}
+
+function updateConnectionStatus(status) {
+    state.connectionStatus = status;
+    
+    switch(status) {
+        case 'connected':
+            elements.connectionStatus.className = 'text-green-500 mr-2';
+            elements.connectionText.textContent = 'Connected';
+            break;
+        case 'disconnected':
+            elements.connectionStatus.className = 'text-red-500 mr-2';
+            elements.connectionText.textContent = 'Disconnected';
+            break;
+        case 'connecting':
+            elements.connectionStatus.className = 'text-yellow-500 mr-2';
+            elements.connectionText.textContent = 'Connecting...';
+            break;
+        case 'error':
+            elements.connectionStatus.className = 'text-red-500 mr-2';
+            elements.connectionText.textContent = 'Connection Error';
+            break;
+    }
+}
+
+function checkConnection() {
+    // Simple ping to check if API is responsive
+    fetch('/api/health')
+        .then(response => {
+            if (response.ok) {
+                updateConnectionStatus('connected');
+            } else {
+                updateConnectionStatus('error');
+            }
+        })
+        .catch(() => {
+            updateConnectionStatus('disconnected');
+        });
+}
+
+// Initialize dashboard when DOM is ready
+document.addEventListener('DOMContentLoaded', initDashboard);
+
+// Memory management - clean up event listeners when page unloads
+window.addEventListener('beforeunload', () => {
+    // Remove event listeners
+    elements.leagueSelect.removeEventListener('change', handleLeagueChange);
+    elements.teamSelect.removeEventListener('change', handleTeamChange);
+    elements.gamesFilter.removeEventListener('change', handleGamesFilterChange);
+    elements.chartType.removeEventListener('change', handleChartTypeChange);
+    
+    // Destroy chart
+    if (state.chart) {
+        state.chart.destroy();
+    }
+    
+    // Clear state
+    Object.keys(state).forEach(key => {
+        if (Array.isArray(state[key])) {
+            state[key] = [];
+        } else if (typeof state[key] === 'object' && state[key] !== null) {
+            state[key] = null;
+        }
+    });
+});// dashboard.js - Optimized dashboard implementation
+'use strict';
+
+// Cache DOM elements to avoid repeated queries
+const elements = {
+    leagueSelect: document.getElementById('leagueSelect'),
+    teamSelect: document.getElementById('teamSelect'),
+    totalGames: document.getElementById('totalGames'),
+    avgScore: document.getElementById('avgScore'),
+    winRate: document.getElementById('winRate'),
+    recentGames: document.getElementById('recentGames'),
+    performanceChart: document.getElementById('performanceChart'),
+    gamesFilter: document.getElementById('gamesFilter'),
+    chartType: document.getElementById('chartType'),
+    loadingOverlay: document.getElementById('loadingOverlay'),
+    connectionStatus: document.getElementById('connectionStatus'),
+    connectionText: document.getElementById('connectionText')
+};
+
+// State management
+const state = {
+    games: [],
+    teams: [],
+    selectedLeague: 'nba',
+    selectedTeam: '',
+    gamesLimit: 5,
+    chartType: 'score',
+    isLoading: false,
+    chart: null,
+    connectionStatus: 'connected',
+    lastUpdate: null
+};
+
+// Initialize dashboard
+function initDashboard() {
+    // Set up event listeners
+    elements.leagueSelect.addEventListener('change', handleLeagueChange);
+    elements.teamSelect.addEventListener('change', handleTeamChange);
+    elements.gamesFilter.addEventListener('change', handleGamesFilterChange);
+    elements.chartType.addEventListener('change', handleChartTypeChange);
+    
+    // Initial data load
+    loadLeagueData();
+    
+    // Set up periodic refresh (every 60 seconds)
+    setInterval(refreshData, 60000);
+    
+    // Set up connection status check
+    setInterval(checkConnection, 30000);
+}
+
+// Event handlers
+function handleLeagueChange(e) {
+    state.selectedLeague = e.target.value;
+    state.selectedTeam = '';
+    elements.teamSelect.innerHTML = '<option value="">Select Team</option>';
+    loadLeagueData();
+}
+
+function handleTeamChange(e) {
+    state.selectedTeam = e.target.value;
+    refreshData();
+}
+
+function handleGamesFilterChange(e) {
+    state.gamesLimit = parseInt(e.target.value, 10);
+    updateRecentGames();
+    updateChart();
+}
+
+function handleChartTypeChange(e) {
+    state.chartType = e.target.value;
+    updateChart();
+}
+
+// Data loading functions
+function loadLeagueData() {
+    setLoading(true);
+    updateConnectionStatus('connecting');
+    
+    fetch(`/api/leagues/${state.selectedLeague}`)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load league data');
+            return response.json();
+        })
+        .then(data => {
+            state.teams = data.teams || [];
+            populateTeamSelect();
+            loadGameData();
+            updateConnectionStatus('connected');
+        })
+        .catch(error => {
+            console.error('Error loading league data:', error);
+            updateConnectionStatus('error');
+            setLoading(false);
+        });
+}
+
+function loadGameData() {
+    setLoading(true);
+    
+    const endpoint = state.selectedTeam 
+        ? `/api/games/${state.selectedLeague}/${state.selectedTeam}`
+        : `/api/games/${state.selectedLeague}`;
+    
+    fetch(endpoint)
+        .then(response => {
+            if (!response.ok) throw new Error('Failed to load game data');
+            return response.json();
+        })
+        .then(data => {
+            // Process and store game data
+            state.games = Array.isArray(data) ? data : [];
+            state.lastUpdate = new Date();
+            
+            // Update UI components
+            updateStats();
+            updateRecentGames();
+            updateChart();
+            
+            setLoading(false);
+        })
+        .catch(error => {
+            console.error('Error loading game data:', error);
+            state.games = [];
+            updateStats();
+            updateRecentGames();
+            updateChart();
+            setLoading(false);
+        });
+}
+
+function refreshData() {
+    // Only refresh if not already loading
+    if (!state.isLoading) {
+        loadGameData();
+    }
+}
+
+// UI update functions
+function populateTeamSelect() {
+    // Clear existing options except the default
+    elements.teamSelect.innerHTML = '<option value="">All Teams</option>';
+    
+    // Add team options
+    state.teams.forEach(team => {
+        const option = document.createElement('option');
+        option.value = team.id;
+        option.textContent = team.name;
+        elements.teamSelect.appendChild(option);
+    });
+}
+
+function updateStats() {
+    const games = state.games;
+    
+    // Update total games
+    elements.totalGames.textContent = games.length;
+    
+    // Calculate average score
+    if (games.length > 0) {
+        const totalHomeScore = games.reduce((sum, game) => sum + (game.homeTeam?.score || 0), 0);
+        const totalAwayScore = games.reduce((sum, game) => sum + (game.awayTeam?.score || 0), 0);
+        const avgScore = (totalHomeScore + totalAwayScore) / (games.length * 2);
+        elements.avgScore.textContent = avgScore.toFixed(1);
+        
+        // Calculate home win rate
+        const homeWins = games.filter(game => (game.homeTeam?.score || 0) > (game.awayTeam?.score || 0)).length;
+        const winRate = (homeWins / games.length) * 100;
+        elements.winRate.textContent = winRate.toFixed(1) + '%';
+    } else {
+        elements.avgScore.textContent = '-';
+        elements.winRate.textContent = '-';
+    }
+}
+
+function updateRecentGames() {
+    const container = elements.recentGames;
+    const games = state.games.slice(0, state.gamesLimit);
+    
+    // Clear container
+    container.innerHTML = '';
+    
+    if (games.length === 0) {
+        container.innerHTML = '<div class="text-center p-4">No games found</div>';
+        return;
+    }
+    
+    // Create game elements
+    games.forEach(game => {
+        const gameElement = document.createElement('div');
+        gameElement.className = 'bg-gray-700 p-4 rounded hover:bg-gray-600 transition-colors mb-4';
+        
+        const gameDate = new Date(game.date).toLocaleDateString();
+        
+        gameElement.innerHTML = `
+            <div class="flex justify-between items-center">
+                <div class="text-lg">
+                    <div class="font-bold">${game.homeTeam?.name || 'Home Team'}</div>
+                    <div class="text-2xl">${game.homeTeam?.score || '0'}</div>
+                </div>
+                <div class="text-gray-400 mx-4">VS</div>
+                <div class="text-lg text-right">
+                    <div class="font-bold">${game.awayTeam?.name || 'Away Team'}</div>
+                    <div class="text-2xl">${game.awayTeam?.score || '0'}</div>
+                </div>
+            </div>
+            <div class="text-sm text-gray-400 mt-2">${gameDate}</div>
+        `;
+        
+        container.appendChild(gameElement);
+    });
+}
+
+function updateChart() {
+    const canvas = elements.performanceChart;
+    const games = state.games.slice(0, state.gamesLimit);
+    
+    // Destroy existing chart if it exists
+    if (state.chart) {
+        state.chart.destroy();
+    }
+    
+    if (games.length === 0) {
+        return;
+    }
+    
+    // Prepare data based on chart type
+    const labels = games.map(game => new Date(game.date).toLocaleDateString());
+    let datasets = [];
+    
+    if (state.chartType === 'score') {
+        datasets = [
+            {
+                label: 'Home Score',
+                data: games.map(game => game.homeTeam?.score || 0),
+                borderColor: 'rgba(59, 130, 246, 1)',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                tension: 0.1
+            },
+            {
+                label: 'Away Score',
+                data: games.map(game => game.awayTeam?.score || 0),
+                borderColor: 'rgba(239, 68, 68, 1)',
+                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                tension: 0.1
+            }
+        ];
+    } else {
+        // Point differential
+        datasets = [
+            {
+                label: 'Point Differential',
+                data: games.map(game => (game.homeTeam?.score || 0) - (game.awayTeam?.score || 0)),
+                borderColor: 'rgba(16, 185, 129, 1)',
+                backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                tension: 0.1
+            }
+        ];
+    }
+    
+    // Create new chart
+    state.chart = new Chart(canvas, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: state.chartType === 'differential',
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    ticks: {
+                        color: 'rgba(255, 255, 255, 0.7)'
+                    }
+                },
+                x: {
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.1)'
+                    },
+                    ticks: {
+                        color: 'rgba(255, 255, 255, 0.7)'
+                    }
+                }
+            },
+            plugins: {
+                legend: {
+                    labels: {
+                        color: 'rgba(255, 255, 255, 0.7)'
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Utility functions
+function setLoading(isLoading) {
+    state.isLoading = isLoading;
+    elements.loadingOverlay.style.display = isLoading ? 'flex' : 'none';
+}
+
+function updateConnectionStatus(status) {
+    state.connectionStatus = status;
+    
+    switch(status) {
+        case 'connected':
+            elements.connectionStatus.className = 'text-green-500 mr-2';
+            elements.connectionText.textContent = 'Connected';
+            break;
+        case 'disconnected':
+            elements.connectionStatus.className = 'text-red-500 mr-2';
+            elements.connectionText.textContent = 'Disconnected';
+            break;
+        case 'connecting':
+            elements.connectionStatus.className = 'text-yellow-500 mr-2';
+            elements.connectionText.textContent = 'Connecting...';
+            break;
+        case 'error':
+            elements.connectionStatus.className = 'text-red-500 mr-2';
+            elements.connectionText.textContent = 'Connection Error';
+            break;
+    }
+}
+
+function checkConnection() {
+    // Simple ping to check if API is responsive
+    fetch('/api/health')
+        .then(response => {
+            if (response.ok) {
+                updateConnectionStatus('connected');
+            } else {
+                updateConnectionStatus('error');
+            }
+        })
+        .catch(() => {
+            updateConnectionStatus('disconnected');
+        });
+}
+
+// Initialize dashboard when DOM is ready
+document.addEventListener('DOMContentLoaded', initDashboard);
+
+// Memory management - clean up event listeners when page unloads
+window.addEventListener('beforeunload', () => {
+    // Remove event listeners
+    elements.leagueSelect.removeEventListener('change', handleLeagueChange);
+    elements.teamSelect.removeEventListener('change', handleTeamChange);
+    elements.gamesFilter.removeEventListener('change', handleGamesFilterChange);
+    elements.chartType.removeEventListener('change', handleChartTypeChange);
+    
+    // Destroy chart
+    if (state.chart) {
+        state.chart.destroy();
+    }
+    
+    // Clear state
+    Object.keys(state).forEach(key => {
+        if (Array.isArray(state[key])) {
+            state[key] = [];
+        } else if (typeof state[key] === 'object' && state[key] !== null) {
+            state[key] = null;
+        }
+    });
+});let selectedTeam = '';
 let currentGames = [];
 let ws;
 let currentChart = null;

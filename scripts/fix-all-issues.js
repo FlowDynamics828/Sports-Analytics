@@ -287,6 +287,30 @@ async function runScript(scriptName) {
   });
 }
 
+// Function to run a fix script
+async function runFixScript(scriptName, fixType) {
+  logger.info(`Running ${fixType} fix...`);
+  const scriptPath = path.join(process.cwd(), 'scripts', scriptName);
+  // Check if script exists
+  if (!fs.existsSync(scriptPath)) {
+    logger.error(`${scriptName} not found at ${scriptPath}`);
+    return false;
+  }
+  // Run the script
+  return new Promise((resolve) => {
+    const child = spawn('node', [scriptPath], { stdio: 'inherit' });
+    child.on('close', (code) => {
+      if (code !== 0) {
+        logger.error(`${fixType} fix failed with code ${code}`);
+        resolve(false);
+      } else {
+        logger.info(`${fixType} fix completed successfully`);
+        resolve(true);
+      }
+    });
+  });
+}
+
 // Helper function to create basic predictive model
 function createBasicPredictiveModel() {
   const scriptDir = path.join(process.cwd(), 'scripts');
@@ -384,42 +408,22 @@ if __name__ == "__main__":
 }
 
 // Helper function to update .env file
-function updateEnvFile() {
+async function updateEnvFile() {
   const envPath = path.join(process.cwd(), '.env');
-  
-  let envContent = '';
-  if (fs.existsSync(envPath)) {
-    envContent = fs.readFileSync(envPath, 'utf8');
-  }
-  
-  // Update ENABLE_PERFORMANCE_LOGGING
-  if (envContent.includes('ENABLE_PERFORMANCE_LOGGING=')) {
-    envContent = envContent.replace(/ENABLE_PERFORMANCE_LOGGING=true/g, 'ENABLE_PERFORMANCE_LOGGING=false');
-  } else {
-    envContent += '\nENABLE_PERFORMANCE_LOGGING=false';
-  }
-  
-  // Add additional optimizations
-  const optimizations = `
-# Optimized settings
-USE_IN_MEMORY_CACHE=true
-MEMORY_USAGE_THRESHOLD=0.95
-MEMORY_CHECK_INTERVAL=1800000
-PYTHON_VERIFICATION_TIMEOUT=60000
-PYTHON_EXECUTION_TIMEOUT=120000
-PYTHON_BRIDGE_MAX_RETRIES=2
+  const envConfig = `
+MEMORY_USAGE_THRESHOLD=0.90
 CACHE_MAX_ITEMS=250
-CACHE_TTL=1800
-CACHE_CHECK_PERIOD=300
-`;
+ENABLE_AGGRESSIVE_GC=true
+ENABLE_PERFORMANCE_LOGGING=false
+  `;
   
-  if (!envContent.includes('# Optimized settings')) {
-    envContent += optimizations;
+  try {
+    await fs.promises.appendFile(envPath, envConfig);
+    console.log(`${colors.green}Updated .env file with memory management settings.${colors.reset}`);
+  } catch (error) {
+    console.log(`${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
+    throw error;
   }
-  
-  fs.writeFileSync(envPath, envContent);
-  console.log(`${colors.green}Updated .env file with optimized settings${colors.reset}`);
-  return true;
 }
 
 // Run the main function

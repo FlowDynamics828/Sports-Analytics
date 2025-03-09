@@ -95,6 +95,85 @@ class StatsCalculator {
     }
 
     /**
+     * Calculate player statistics
+     * @param {string} playerId - Player identifier
+     * @param {string} league - League identifier
+     * @param {Object} options - Additional options including timeframe
+     * @returns {Object} - Comprehensive player statistics
+     */
+    static async calculatePlayerStats(playerId, league, options = {}) {
+        const startTime = performance.now();
+
+        try {
+            // Cache check
+            const cacheKey = `player_stats:${playerId}:${league}:${options.timeframe || 'all'}`;
+            const cachedStats = await cache.get(cacheKey);
+            if (cachedStats) {
+                return cachedStats;
+            }
+
+            // Get player games from appropriate collection
+            const db = req.app.locals.db;
+            const collectionName = `${league.toLowerCase()}_player_stats`;
+            
+            let query = { playerId };
+            
+            // Apply timeframe filter if specified
+            if (options.timeframe) {
+                const startDate = new Date();
+                startDate.setDate(startDate.getDate() - options.timeframe);
+                query.date = { $gte: startDate };
+            }
+            
+            const playerGames = await db.collection(collectionName)
+                .find(query)
+                .sort({ date: -1 })
+                .limit(options.limit || 100)
+                .toArray();
+            
+            // Calculate basic and advanced stats
+            const baseStats = this.calculatePlayerBaseStats(playerGames, league);
+            const advancedStats = this.calculatePlayerAdvancedStats(playerGames, league);
+            
+            // Calculate trends
+            const trends = this.calculatePlayerTrends(playerGames);
+            
+            // Get predictions using predictive model
+            const predictions = await predictiveModel.predict({
+                league,
+                predictionType: 'PLAYER_STATS',
+                input_data: {
+                    playerId,
+                    recentGames: playerGames.slice(0, 10)
+                }
+            });
+            
+            const playerStats = {
+                base: baseStats,
+                advanced: advancedStats,
+                trends,
+                predictions,
+                metadata: {
+                    playerId,
+                    league,
+                    gamesAnalyzed: playerGames.length,
+                    timeframe: options.timeframe,
+                    processingTime: performance.now() - startTime,
+                    lastUpdated: new Date()
+                }
+            };
+            
+            // Cache the results
+            await cache.set(cacheKey, playerStats, 300); // 5 minutes TTL
+            
+            return playerStats;
+        } catch (error) {
+            logger.error('Player stats calculation error:', error);
+            throw new Error(`Failed to calculate player stats: ${error.message}`);
+        }
+    }
+
+    /**
      * Get the date of the most recent game in the dataset
      * @param {Array} games - Array of game objects
      * @returns {string} - ISO formatted date string
@@ -337,6 +416,8 @@ StatsCalculator.analyzePerformanceTrends = (games, teamId) => ({});
 StatsCalculator.analyzeScoringTrends = (games, teamId) => ({});
 StatsCalculator.analyzeMomentumTrends = (games, teamId) => ({});
 StatsCalculator.analyzeSituationalTrends = (games, teamId) => ({});
+StatsCalculator.calculatePlayerTrends = (playerGames) => ({});
+StatsCalculator.calculateConfidenceScore = (dataPointCount) => Math.min(100, Math.max(50, dataPointCount / 10));
 
 // Export the StatsCalculator class
 module.exports = { StatsCalculator };

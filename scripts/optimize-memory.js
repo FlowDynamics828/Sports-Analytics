@@ -32,6 +32,9 @@ const memoryOptimizer = {
   // Track intervals
   intervals: [],
   
+  lastOptimization: 0, // Track the last optimization time
+  cooldownPeriod: 60000, // 1 minute cooldown period
+
   // Start memory monitoring
   start: function(interval = 300000) { // Default: check every 5 minutes
     logger.info('Starting memory optimization module');
@@ -64,6 +67,12 @@ const memoryOptimizer = {
   
   // Check memory usage and optimize if needed
   checkMemoryUsage: function() {
+    const now = Date.now();
+    if (now - this.lastOptimization < this.cooldownPeriod) {
+      logger.info('Skipping memory optimization - cooldown period active');
+      return;
+    }
+
     const memoryUsage = process.memoryUsage();
     const heapUsed = memoryUsage.heapUsed;
     const heapTotal = memoryUsage.heapTotal;
@@ -81,6 +90,7 @@ const memoryOptimizer = {
     if (memoryRatio > threshold) {
       logger.warn(`High memory usage detected: ${usagePercentage}% of heap used (${heapUsedMB}MB / ${heapTotalMB}MB)`);
       this.optimizeMemory(memoryRatio);
+      this.lastOptimization = now; // Update the last optimization time
     }
     
     // Record memory usage history
@@ -100,56 +110,39 @@ const memoryOptimizer = {
   // Optimize memory usage
   optimizeMemory: function(currentUsage) {
     logger.info('Starting memory optimization');
-    
-    // Record optimization start time
-    const startTime = process.hrtime();
-    
-    // 1. Clear module caches for non-essential modules
-    this.clearModuleCache();
-    
-    // 2. Clear any global caches
-    this.clearGlobalCaches();
-    
-    // 3. Force garbage collection if available
-    if (global.gc) {
-      logger.info('Running garbage collection');
-      global.gc();
-    } else {
-      logger.info('Garbage collection not available. Run with --expose-gc flag for better optimization.');
+    try {
+      // Record optimization start time
+      const startTime = process.hrtime();
+      
+      // 1. Clear module caches for non-essential modules
+      this.clearModuleCache();
+      
+      // 2. Clear any global caches
+      this.clearGlobalCaches();
+      
+      // 3. Force garbage collection if available
+      if (global.gc) {
+        logger.info('Running garbage collection');
+        global.gc();
+      } else {
+        logger.info('Garbage collection not available. Run with --expose-gc flag for better optimization.');
+      }
+      
+      // 4. Check memory usage after optimization
+      const memoryUsage = process.memoryUsage();
+      const heapUsed = memoryUsage.heapUsed;
+      const heapTotal = memoryUsage.heapTotal;
+      const memoryRatio = heapUsed / heapTotal;
+      
+      // Format memory values for logging (in MB)
+      const heapUsedMB = Math.round(heapUsed / (1024 * 1024));
+      const heapTotalMB = Math.round(heapTotal / (1024 * 1024));
+      const usagePercentage = Math.round(memoryRatio * 100);
+      
+      logger.info(`Memory usage after optimization: ${usagePercentage}% (${heapUsedMB}MB / ${heapTotalMB}MB)`);
+    } catch (error) {
+      logger.error('Error during memory optimization:', error);
     }
-    
-    // 4. Check memory usage after optimization
-    const memoryUsage = process.memoryUsage();
-    const heapUsed = memoryUsage.heapUsed;
-    const heapTotal = memoryUsage.heapTotal;
-    const memoryRatio = heapUsed / heapTotal;
-    
-    // Format memory values for logging (in MB)
-    const heapUsedMB = Math.round(heapUsed / (1024 * 1024));
-    const heapTotalMB = Math.round(heapTotal / (1024 * 1024));
-    const usagePercentage = Math.round(memoryRatio * 100);
-    
-    // Calculate optimization duration
-    const [seconds, nanoseconds] = process.hrtime(startTime);
-    const duration = seconds + nanoseconds / 1e9;
-    
-    logger.info(`Memory optimization completed in ${duration.toFixed(2)}s`);
-    logger.info(`Memory usage after optimization: ${usagePercentage}% (${heapUsedMB}MB / ${heapTotalMB}MB)`);
-    
-    // Calculate memory saved
-    const savedPercentage = Math.round((currentUsage - memoryRatio) * 100);
-    if (savedPercentage > 0) {
-      logger.info(`Memory optimization saved ${savedPercentage}% of heap usage`);
-    } else {
-      logger.warn('Memory optimization did not reduce memory usage');
-    }
-    
-    return {
-      before: Math.round(currentUsage * 100),
-      after: usagePercentage,
-      saved: savedPercentage,
-      duration: duration.toFixed(2)
-    };
   },
   
   // Clear module cache for non-essential modules

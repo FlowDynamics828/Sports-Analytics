@@ -511,7 +511,7 @@ console.log('Application started with memory management');
         }
         
         // Add or update scripts
-        packageJson.scripts['start:optimized'] = \`node --max-old-space-size=\${memoryLimit} --expose-gc startup.js\`;
+        packageJson.scripts['start:optimized'] = `node --max-old-space-size=${memoryLimit} --expose-gc startup.js`;
         packageJson.scripts['optimize:memory'] = 'node scripts/memoryManager.js';
         packageJson.scripts['fix:memory'] = 'node scripts/fix-memory-issues.js';
         packageJson.scripts['fix:redis'] = 'node scripts/fix-redis-connection.js';
@@ -548,6 +548,30 @@ console.log('Application started with memory management');
     console.error(`${colors.red}Error fixing memory management issues: ${error.message}${colors.reset}`);
     process.exit(1);
   }
+}
+
+const cooldownPeriod = 300000; // 5 minutes cooldown period
+let lastOptimizationTime = 0;
+
+function checkMemory() {
+  const now = Date.now();
+  if (now - lastOptimizationTime < cooldownPeriod) {
+    console.log(`${colors.yellow}Skipping memory optimization - cooldown period active${colors.reset}`);
+    return;
+  }
+
+  const memoryUsage = process.memoryUsage();
+  const heapRatio = memoryUsage.heapUsed / memoryUsage.heapTotal;
+
+  if (heapRatio > parseFloat(process.env.MEMORY_USAGE_THRESHOLD)) {
+    console.log(`${colors.red}High memory usage detected: ${Math.round(heapRatio * 100)}% of heap used${colors.reset}`);
+    optimizeMemory();
+    lastOptimizationTime = now;
+  }
+}
+
+function optimizeMemory() {
+  // ...existing code...
 }
 
 main();

@@ -190,48 +190,38 @@ class PythonBridge extends EventEmitter {
     // Validate input
     this.#validateInput(data);
 
-    // Ensure script path is consistent by always using the scripts directory
-    // This fixes the path inconsistency issue where the app looks in different locations
-    if (!scriptName.includes(path.sep)) {
-      // If scriptName doesn't include a path separator, assume it's in the scripts directory
-      scriptName = path.join('scripts', scriptName);
+    // Use a fixed path to the script to avoid repeated file system checks
+    const scriptBaseName = path.basename(scriptName);
+    const fixedScriptPath = path.join('scripts', scriptBaseName);
+
+    // Check if the script exists at the fixed path
+    const scriptPath = path.resolve(process.cwd(), fixedScriptPath);
+
+    // Only check file existence once and cache the result
+    let scriptExists = false;
+    let finalScriptPath = '';
+
+    try {
+      await fs.access(scriptPath);
+      scriptExists = true;
+      finalScriptPath = fixedScriptPath;
+    } catch (e) {
+      // Script not found at primary location, check one alternative location
+      const alternativeScriptPath = path.resolve(process.cwd(), scriptBaseName);
+
+      try {
+        await fs.access(alternativeScriptPath);
+        scriptExists = true;
+        finalScriptPath = scriptBaseName;
+      } catch (e) {
+        // Not found in alternative location either
+      }
     }
 
-    // Check if the script exists at the specified path
-    const scriptPath = path.resolve(process.cwd(), scriptName);
-    if (!fs.existsSync(scriptPath)) {
-      this.logger.warn(`Script not found at ${scriptPath}, checking alternative locations`, {
-        executionId,
-        scriptName
-      });
-
-      // Try alternative locations
-      const alternativeLocations = [
-        path.resolve(process.cwd(), 'scripts', path.basename(scriptName)),
-        path.resolve(process.cwd(), path.basename(scriptName)),
-        path.resolve(process.cwd(), 'service', path.basename(scriptName)),
-        path.resolve(process.cwd(), 'service', path.basename(scriptName).replace('_', '-')),
-        path.resolve(process.cwd(), 'scripts', path.basename(scriptName).replace('_', '-'))
-      ];
-
-      let found = false;
-      for (const location of alternativeLocations) {
-        if (fs.existsSync(location)) {
-          scriptName = path.relative(process.cwd(), location);
-          this.logger.info(`Found script at alternative location: ${location}`, {
-            executionId,
-            scriptName
-          });
-          found = true;
-          break;
-        }
-      }
-
-      if (!found) {
-        const error = new Error(`Script not found: ${scriptName}`);
-        this.#handleExecutionError(error, executionId, scriptName, startTime);
-        throw error;
-      }
+    if (!scriptExists) {
+      const error = new Error(`Script not found: ${scriptName}`);
+      this.#handleExecutionError(error, executionId, scriptName, startTime);
+      throw error;
     }
 
     // Prepare execution options

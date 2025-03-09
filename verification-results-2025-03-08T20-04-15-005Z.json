@@ -1,0 +1,281 @@
+{
+  "collections": {
+    "status": "issues",
+    "details": {
+      "available": [
+        "sessions",
+        "customers",
+        "mlb-games",
+        "predictions",
+        "ligue1-games",
+        "epl-games",
+        "nba-games",
+        "ncaaw-games",
+        "mls-games",
+        "wnba-games",
+        "seriea-games",
+        "bundesliga-games",
+        "ncaaf-games",
+        "stats",
+        "nhl-games",
+        "users",
+        "ncaab-games",
+        "games",
+        "subscriptions",
+        "laliga-games",
+        "usage_metrics",
+        "nfl-games"
+      ],
+      "nfl_player_stats": false,
+      "nba_player_stats": false,
+      "mlb_player_stats": false,
+      "nhl_player_stats": false,
+      "premier_league_player_stats": false,
+      "la_liga_player_stats": false,
+      "bundesliga_player_stats": false,
+      "serie_a_player_stats": false,
+      "games": true,
+      "teams": false,
+      "predictions": true
+    }
+  },
+  "playerStats": {
+    "status": "issues",
+    "details": {
+      "NFL": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "nfl_player_stats"
+      },
+      "NBA": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "nba_player_stats"
+      },
+      "MLB": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "mlb_player_stats"
+      },
+      "NHL": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "nhl_player_stats"
+      },
+      "PREMIER_LEAGUE": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "premier_league_player_stats"
+      },
+      "LA_LIGA": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "la_liga_player_stats"
+      },
+      "BUNDESLIGA": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "bundesliga_player_stats"
+      },
+      "SERIE_A": {
+        "count": 0,
+        "latestDate": null,
+        "schemaStatus": "N/A",
+        "missingFields": [],
+        "collection": "serie_a_player_stats"
+      }
+    },
+    "sampleData": {}
+  },
+  "gameStats": {
+    "status": "ok",
+    "details": {
+      "totalGames": 943,
+      "completedGames": 932,
+      "liveGames": 11,
+      "upcomingGames": 0,
+      "gamesByLeague": {
+        "NFL": 113,
+        "NBA": 118,
+        "MLB": 118,
+        "NHL": 117,
+        "PREMIER_LEAGUE": 0,
+        "LA_LIGA": 0,
+        "BUNDESLIGA": 122,
+        "SERIE_A": 0
+      },
+      "recentGames": [
+        {
+          "id": "67b4ae73f84dc7a3e73d502f",
+          "league": "SERIEA",
+          "date": "2025-02-18T15:59:47.444Z",
+          "homeTeam": "Lecce",
+          "awayTeam": "Atalanta",
+          "status": "live"
+        },
+        {
+          "id": "67b4ae73f84dc7a3e73d4fbd",
+          "league": "SERIEA",
+          "date": "2025-02-18T15:59:47.444Z",
+          "homeTeam": "Hellas Verona",
+          "awayTeam": "Napoli",
+          "status": "completed"
+        },
+        {
+          "id": "67b4ae73f84dc7a3e73d4fbc",
+          "league": "SERIEA",
+          "date": "2025-02-18T15:59:47.444Z",
+          "homeTeam": "Salernitana",
+          "awayTeam": "Sampdoria",
+          "status": "completed"
+        },
+        {
+          "id": "67b4ae73f84dc7a3e73d4fbb",
+          "league": "SERIEA",
+          "date": "2025-02-18T15:59:47.444Z",
+          "homeTeam": "Hellas Verona",
+          "awayTeam": "Inter Milan",
+          "status": "completed"
+        },
+        {
+          "id": "67b4ae73f84dc7a3e73d4fba",
+          "league": "SERIEA",
+          "date": "2025-02-18T15:59:47.444Z",
+          "homeTeam": "Lazio",
+          "awayTeam": "Lecce",
+          "status": "completed"
+        }
+      ],
+      "schemaStatus": "ok",
+      "missingFields": []
+    }
+  },
+  "teamStats": {
+    "status": "warning",
+    "details": {
+      "collectionMissing": true,
+      "teamsExtracted": 193,
+      "teamsByLeague": {
+        "NFL": 31,
+        "NBA": 30,
+        "MLB": 27,
+        "NHL": 30,
+        "PREMIER_LEAGUE": 0,
+        "LA_LIGA": 0,
+        "BUNDESLIGA": 18,
+        "SERIE_A": 0
+      },
+      "teamsSample": [
+        {
+          "_id": "bucks",
+          "name": "Milwaukee Bucks",
+          "league": "NBA"
+        },
+        {
+          "_id": "angels",
+          "name": "Los Angeles Angels",
+          "league": "MLB"
+        },
+        {
+          "_id": "kings",
+          "name": "Sacramento Kings",
+          "league": "NBA"
+        },
+        {
+          "_id": "raiders",
+          "name": "Las Vegas Raiders",
+          "league": "NFL"
+        },
+        {
+          "_id": "marlins",
+          "name": "Miami Marlins",
+          "league": "MLB"
+        }
+      ]
+    }
+  },
+  "predictions": {
+    "status": "ok",
+    "details": {
+      "totalPredictions": 0,
+      "predictionsByLeague": {
+        "NFL": 0,
+        "NBA": 0,
+        "MLB": 0,
+        "NHL": 0,
+        "PREMIER_LEAGUE": 0,
+        "LA_LIGA": 0,
+        "BUNDESLIGA": 0,
+        "SERIE_A": 0
+      },
+      "predictionsByType": {},
+      "schemaStatus": "N/A",
+      "missingFields": [],
+      "recentPredictions": []
+    }
+  },
+  "sync": {
+    "status": "ok",
+    "lastSync": "2025-03-07T21:44:00.108Z",
+    "details": {
+      "combined.log": {
+        "size": 5747923,
+        "modified": "2025-03-08T12:35:58.831Z",
+        "lastSyncEntries": [
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T17:56:09.371Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2170:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2595:11)\",\"timestamp\":\"2025-03-07T17:56:09.371Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T18:02:46.775Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2170:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2595:11)\",\"timestamp\":\"2025-03-07T18:02:46.775Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T18:18:11.476Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2170:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2595:11)\",\"timestamp\":\"2025-03-07T18:18:11.476Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T19:20:16.896Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2170:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2595:11)\",\"timestamp\":\"2025-03-07T19:20:16.896Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T19:20:16.897Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2170:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\startup.js:344:11)\",\"timestamp\":\"2025-03-07T19:20:16.897Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T20:42:31.157Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2331:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2756:11)\",\"timestamp\":\"2025-03-07T20:42:31.157Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T20:42:31.158Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2331:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\startup.js:419:11)\",\"timestamp\":\"2025-03-07T20:42:31.158Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T21:28:38.032Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2331:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2756:11)\",\"timestamp\":\"2025-03-07T21:28:38.032Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T21:32:03.384Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2331:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2756:11)\",\"timestamp\":\"2025-03-07T21:32:03.384Z\"}\r",
+          "{\"error\":\"Cannot read properties of null (reading 'removeAllListeners')\",\"level\":\"warn\",\"message\":\"Error during Redis connection cleanup:\",\"metadata\":{\"service\":\"predictive-model\",\"timestamp\":\"2025-03-07T21:44:00.108Z\"},\"service\":\"predictive-model\",\"stack\":\"TypeError: Cannot read properties of null (reading 'removeAllListeners')\\n    at TheAnalyzerPredictiveModel.cleanup (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2331:26)\\n    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)\\n    at async process.<anonymous> (C:\\\\Users\\\\d07ch\\\\OneDrive\\\\Desktop\\\\Sports Analytics\\\\sports-analytics\\\\api.js:2756:11)\",\"timestamp\":\"2025-03-07T21:44:00.108Z\"}\r"
+        ],
+        "syncTimestamp": "2025-03-07T21:44:00.108Z"
+      },
+      "hoursSinceSync": 22.337470555555555
+    }
+  },
+  "summary": {
+    "overallStatus": "warning",
+    "totalRecords": 943,
+    "issues": [
+      "Missing collection: nfl_player_stats",
+      "Missing collection: nba_player_stats",
+      "Missing collection: mlb_player_stats",
+      "Missing collection: nhl_player_stats",
+      "Missing collection: premier_league_player_stats",
+      "Missing collection: la_liga_player_stats",
+      "Missing collection: bundesliga_player_stats",
+      "Missing collection: serie_a_player_stats",
+      "Missing collection: teams",
+      "NFL has no player stats records",
+      "NBA has no player stats records",
+      "MLB has no player stats records",
+      "NHL has no player stats records",
+      "PREMIER_LEAGUE has no player stats records",
+      "LA_LIGA has no player stats records",
+      "BUNDESLIGA has no player stats records",
+      "SERIE_A has no player stats records",
+      "No dedicated teams collection, using teams extracted from games"
+    ],
+    "issuesCount": 18,
+    "verificationTime": "2025-03-08T20:04:15.002Z"
+  }
+}
