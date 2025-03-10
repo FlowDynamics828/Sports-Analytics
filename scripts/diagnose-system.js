@@ -294,7 +294,17 @@ async function checkPorts() {
 
 // Function to check system resources
 function checkSystemResources() {
-  console.log(`\n${colors.bright}Checking System Resources:${colors.reset}`);
+  console.log(`${colors.bright}Checking system resources...${colors.reset}`);
+  
+  // Check CPU
+  const cpuCount = os.cpus().length;
+  console.log(`CPU cores: ${cpuCount}`);
+  
+  if (cpuCount < 2) {
+    console.log(`${colors.yellow}⚠ Low CPU core count. Performance may be affected.${colors.reset}`);
+  } else {
+    console.log(`${colors.green}✓ CPU core count is sufficient${colors.reset}`);
+  }
   
   // Check memory
   const totalMemory = os.totalmem();
@@ -303,59 +313,29 @@ function checkSystemResources() {
   const freeMemoryGB = (freeMemory / (1024 * 1024 * 1024)).toFixed(2);
   const memoryUsagePercent = ((totalMemory - freeMemory) / totalMemory * 100).toFixed(2);
   
-  console.log(`  Total memory: ${totalMemoryGB} GB`);
-  console.log(`  Free memory: ${freeMemoryGB} GB`);
-  console.log(`  Memory usage: ${memoryUsagePercent}%`);
+  console.log(`Total memory: ${totalMemoryGB} GB`);
+  console.log(`Free memory: ${freeMemoryGB} GB (${memoryUsagePercent}% used)`);
   
-  // Check CPU
-  const cpuCount = os.cpus().length;
-  console.log(`  CPU cores: ${cpuCount}`);
+  if (freeMemory < 500 * 1024 * 1024) { // Less than 500MB free
+    console.log(`${colors.yellow}Warning: Low memory available. Performance may be affected.${colors.reset}`);
+    console.log(`Recommendation: Close other applications to free up memory.`);
+    overallStatus = false;
+  }
   
   // Check disk space
   try {
-    let diskInfo;
-    if (process.platform === 'win32') {
-      // Windows
-      const drive = process.cwd().split(path.sep)[0];
-      diskInfo = execSync(`wmic logicaldisk where "DeviceID='${drive}'" get Size,FreeSpace /format:csv`).toString();
-      const lines = diskInfo.trim().split('\n');
-      if (lines.length >= 2) {
-        const values = lines[1].split(',');
-        if (values.length >= 3) {
-          const freeSpace = parseInt(values[1]) / (1024 * 1024 * 1024);
-          const totalSpace = parseInt(values[2]) / (1024 * 1024 * 1024);
-          console.log(`  Disk space (${drive}): ${freeSpace.toFixed(2)} GB free of ${totalSpace.toFixed(2)} GB`);
-        }
-      }
-    } else {
-      // Unix-like
-      const df = execSync(`df -h "${process.cwd()}"`).toString();
-      const lines = df.trim().split('\n');
-      if (lines.length >= 2) {
-        const values = lines[1].split(/\s+/);
-        if (values.length >= 4) {
-          console.log(`  Disk space: ${values[3]} free of ${values[1]}`);
-        }
+    const df = execSync(`df -h "${process.cwd()}"`).toString();
+    const lines = df.trim().split('\n');
+    if (lines.length >= 2) {
+      const values = lines[1].split(/\s+/);
+      if (values.length >= 4) {
+        console.log(`Disk space: ${values[3]} free of ${values[1]}`);
       }
     }
   } catch (error) {
-    console.log(`  Disk space check: ${colors.red}ERROR${colors.reset}`);
-    console.log(`  Error: ${error.message}`);
+    console.log(`Disk space check: ${colors.red}ERROR${colors.reset}`);
+    console.log(`Error: ${error.message}`);
   }
-  
-  // Check for resource issues
-  if (freeMemory < 500 * 1024 * 1024) { // Less than 500MB free
-    console.log(`  ${colors.yellow}Warning: Low memory available. Performance may be affected.${colors.reset}`);
-    console.log(`  Recommendation: Close other applications to free up memory.`);
-    overallStatus = false;
-  }
-  
-  if (cpuCount < 2) {
-    console.log(`  ${colors.yellow}Warning: Limited CPU resources. Performance may be affected.${colors.reset}`);
-    overallStatus = false;
-  }
-  
-  return true;
 }
 
 // Function to check required files

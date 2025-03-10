@@ -1,0 +1,116 @@
+<!-- Predictions Component -->
+<div class="bg-gray-800 p-6 rounded-lg shadow-lg mb-8">
+    <h2 class="text-xl font-bold mb-4">Predictive Analytics</h2>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Prediction Controls -->
+        <div>
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-400 mb-1">Prediction Type</label>
+                <select id="predictTypeSelect" class="bg-gray-700 w-full p-2 rounded">
+                    <option value="single_factor">Single Factor</option>
+                    <option value="multi_factor">Multi-Factor</option>
+                    <option value="advanced_analytics">Advanced Analytics</option>
+                </select>
+            </div>
+            
+            <!-- Multi-factor inputs (hidden by default) -->
+            <div id="multiFactorOptions" class="hidden">
+                <h3 class="font-semibold mb-2">Factors</h3>
+                
+                <div id="factorInputs" class="mb-4">
+                    <!-- Factors will be added here dynamically -->
+                </div>
+                
+                <button id="addFactorBtn" type="button" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm mb-4">
+                    Add Factor
+                </button>
+            </div>
+            
+            <button id="runPredictionBtn" class="w-full bg-blue-600 hover:bg-blue-700 py-3 px-4 rounded font-semibold transition-colors">
+                Generate Prediction
+            </button>
+        </div>
+        
+        <!-- Current Parameters -->
+        <div class="bg-gray-700 p-4 rounded">
+            <h3 class="font-semibold mb-2">Current Parameters</h3>
+            <div class="space-y-2 text-sm">
+                <div class="flex justify-between">
+                    <span class="text-gray-400">League:</span>
+                    <span id="currentLeague">NBA</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Team:</span>
+                    <span id="currentTeam">All Teams</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Prediction Type:</span>
+                    <span id="currentPredictionType">Single Factor</span>
+                </div>
+                <div class="flex justify-between">
+                    <span class="text-gray-400">Model Version:</span>
+                    <span>3.0.0</span>
+                </div>
+            </div>
+            
+            <div class="mt-4 pt-4 border-t border-gray-600">
+                <h3 class="font-semibold mb-2">Historical Performance</h3>
+                <div class="text-center">
+                    <div class="text-2xl font-bold text-blue-500">83.7%</div>
+                    <div class="text-xs text-gray-400">Model accuracy for selected league</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Prediction Results -->
+<div id="predictionsContainer" class="hidden mb-8">
+    <h2 class="text-xl font-bold mb-4">Prediction Results</h2>
+    
+    <!-- Loading indicator -->
+    <div id="predictionsLoading" class="hidden bg-gray-800 p-8 rounded-lg text-center mb-4">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+        <p class="mt-4">Generating prediction...</p>
+    </div>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Game Outcome Prediction -->
+        <div id="gameOutcomeCard"></div>
+        
+        <!-- Player Performance Prediction -->
+        <div id="playerPerformanceCard"></div>
+    </div>
+    
+    <!-- Team Trends Prediction -->
+    <div id="trendsCard" class="mt-6"></div>
+    
+    <!-- Prediction Metadata -->
+    <div id="predictionMetadata" class="mt-4 text-center"></div>
+    
+    <!-- Actions -->
+    <div class="flex justify-end mt-4 space-x-4">
+        <button id="exportPredictionBtn" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
+            Export Prediction
+        </button>
+        <button id="savePredictionBtn" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+            Save Prediction
+        </button>
+    </div>
+</div>
+
+<!-- Prediction History -->
+<div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+    <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-bold">Recent Predictions</h2>
+        <button id="exportHistoryBtn" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
+            Export History
+        </button>
+    </div>
+    
+    <div id="predictionHistory" class="space-y-4">
+        <!-- Will be populated with prediction history -->
+        <div class="text-center text-gray-400 py-8">No prediction history available</div>
+    </div>
+</div>

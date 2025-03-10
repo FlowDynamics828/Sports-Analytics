@@ -18,8 +18,25 @@ const os = require('os');
 const MetricsManager = require('../utils/metricsManager');
 const rateLimiter = require('../utils/rateLimiter');
 const { CacheManager } = require('../utils/cache');
+const { v4: uuidv4 } = require('uuid');
+const express = require('express');
+const http = require('http');
+const helmet = require('helmet');
+const cors = require('cors');
+const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
+const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
+const { registerInstrumentations } = require('@opentelemetry/instrumentation');
+const { MongoDBInstrumentation } = require('@opentelemetry/instrumentation-mongodb');
+const { RedisInstrumentation } = require('@opentelemetry/instrumentation-ioredis');
+const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
+const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
+const { Resource } = require('@opentelemetry/resources');
+const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
+const crypto = require('crypto');
+const fetch = require('node-fetch');
 
-// Configure logging with .env settings
+// Configure logging with .env settings and encryption
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: format.combine(
@@ -33,14 +50,18 @@ const logger = winston.createLogger({
     new winston.transports.File({
       filename: 'error.log',
       level: 'error',
-      maxsize: 10000000, // 10MB
-      maxFiles: 5,
-      tailable: true
+      maxsize: 20000000, // 20MB
+      maxFiles: 10,
+      tailable: true,
+      transform: (info) => {
+        info.message = crypto.createHash('sha256').update(info.message).digest('hex');
+        return info;
+      }
     }),
     new winston.transports.File({
       filename: 'combined.log',
-      maxsize: 10000000,
-      maxFiles: 5,
+      maxsize: 20000000,
+      maxFiles: 10,
       tailable: true
     }),
     new winston.transports.Console({
@@ -54,26 +75,27 @@ const logger = winston.createLogger({
 
 /**
  * Predictive model class for sports analytics
- * Version: 3.0.0
+ * Version: 3.1.0
+ * @class TheAnalyzerPredictiveModel
  */
 class TheAnalyzerPredictiveModel extends EventEmitter {
   constructor() {
     super();
 
     this.config = {
-      mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics',
+      mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics?replicaSet=rs0',
       dbName: process.env.MONGODB_DB_NAME || 'sports-analytics',
       pythonScript: process.env.PYTHON_SCRIPT || 'predictive_model.py',
       port: parseInt(process.env.PORT, 10) || 5050,
-      modelUpdateInterval: parseInt(process.env.MODEL_UPDATE_INTERVAL, 10) || 1209600000, // 14 days from .env
+      modelUpdateInterval: parseInt(process.env.MODEL_UPDATE_INTERVAL, 10) || 1209600000,
       redis: {
         host: process.env.REDIS_HOST || 'localhost',
         port: parseInt(process.env.REDIS_PORT, 10) || 6379,
         password: process.env.REDIS_PASSWORD || undefined,
         enableOfflineQueue: process.env.REDIS_ENABLE_OFFLINE_QUEUE === 'true',
         retryStrategy: (times) => {
-          const maxDelay = parseInt(process.env.REDIS_RETRY_STRATEGY_MAX_DELAY, 10) || 2000;
-          const delay = Math.min(times * 50, maxDelay);
+          const maxDelay = parseInt(process.env.REDIS_RETRY_STRATEGY_MAX_DELAY, 10) || 5000;
+          const delay = Math.min(times * 100, maxDelay);
           logger.info(`Redis connection retry attempt ${times} after ${delay}ms`, {
             metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
@@ -82,36 +104,36 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
         connectionName: 'predictive-model',
         connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT, 10) || 10000,
         showFriendlyErrorStack: true,
-        maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES, 10) || 3
+        maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES, 10) || 5
       },
       cache: {
-        ttl: parseInt(process.env.CACHE_TTL, 10) || 1800, // 30 minutes from .env
-        max: parseInt(process.env.CACHE_MAX_ITEMS, 10) || 500,
-        checkPeriod: parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 300 // 5 minutes from .env
+        ttl: parseInt(process.env.CACHE_TTL, 10) || 3600, // 1 hour
+        max: parseInt(process.env.CACHE_MAX_ITEMS, 10) || 1000,
+        checkPeriod: parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 300
       },
       circuitBreaker: {
-        timeout: parseInt(process.env.PREDICTION_TIMEOUT, 10) || 30000,
-        errorThresholdPercentage: 50,
-        resetTimeout: 30000,
-        rollingCountTimeout: 10000
+        timeout: parseInt(process.env.PREDICTION_TIMEOUT, 10) || 60000,
+        errorThresholdPercentage: 40,
+        resetTimeout: 60000,
+        rollingCountTimeout: 30000
       },
       rateLimit: {
-        windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 900000, // 15 minutes from .env
-        max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 50
+        windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 900000,
+        max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100
       },
       streaming: {
-        batchSize: 50,
-        interval: 5000, // 5 seconds
-        maxQueueSize: 500
+        batchSize: 100,
+        interval: 5000,
+        maxQueueSize: 1000
       },
       monitoring: {
-        healthCheckInterval: parseInt(process.env.HEALTH_CHECK_INTERVAL, 10) || 300000, // 5 minutes from .env
-        metricsInterval: parseInt(process.env.METRICS_INTERVAL, 10) || 300000 // 5 minutes from .env
+        healthCheckInterval: parseInt(process.env.HEALTH_CHECK_INTERVAL, 10) || 60000, // 1 minute
+        metricsInterval: parseInt(process.env.METRICS_INTERVAL, 10) || 60000
       },
       alertThresholds: {
-        memoryUsage: parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.80,
-        cpuLoad: parseFloat(process.env.CPU_LOAD_THRESHOLD) || 0.80,
-        networkTraffic: parseInt(process.env.NETWORK_TRAFFIC_THRESHOLD, 10) || 52428800 // 50MB from .env
+        memoryUsage: parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.85,
+        cpuLoad: parseFloat(process.env.CPU_LOAD_THRESHOLD) || 0.85,
+        networkTraffic: parseInt(process.env.NETWORK_TRAFFIC_THRESHOLD, 10) || 104857600 // 100MB
       }
     };
 
@@ -119,6 +141,28 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
       'NFL', 'NBA', 'MLB', 'NHL',
       'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
     ];
+
+    this.LEAGUE_IDS = {
+      'NFL': '4391',
+      'NBA': '4387',
+      'MLB': '4424',
+      'NHL': '4380',
+      'PREMIER_LEAGUE': '4328',
+      'LA_LIGA': '4335',
+      'BUNDESLIGA': '4331',
+      'SERIE_A': '4332'
+    };
+
+    this.SPORT_MAPPING = {
+      'NFL': 'Football',
+      'NBA': 'Basketball',
+      'MLB': 'Baseball',
+      'NHL': 'Hockey',
+      'PREMIER_LEAGUE': 'Soccer',
+      'LA_LIGA': 'Soccer',
+      'BUNDESLIGA': 'Soccer',
+      'SERIE_A': 'Soccer'
+    };
 
     this.PREDICTION_TYPES = {
       SINGLE_FACTOR: 'single_factor',
@@ -139,16 +183,36 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
     this.xgbModels = new Map();
     this.lgbModels = new Map();
 
-    // Initialize MetricsManager for monitoring
+    // Initialize OpenTelemetry
+    const provider = new NodeTracerProvider({
+      resource: new Resource({
+        [SemanticResourceAttributes.SERVICE_NAME]: 'predictive-model',
+        [SemanticResourceAttributes.SERVICE_VERSION]: '3.1.0'
+      })
+    });
+    const exporter = new OTLPTraceExporter({ url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces' });
+    provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
+    provider.register();
+    registerInstrumentations({
+      instrumentations: [
+        new MongoDBInstrumentation(),
+        new RedisInstrumentation(),
+        new ExpressInstrumentation(),
+        new HttpInstrumentation()
+      ]
+    });
+    this.tracer = provider.getTracer('predictive-model');
+
+    // Initialize MetricsManager
     try {
       this.metrics = MetricsManager.getInstance({
         logLevel: this.config.logLevel,
         alertThresholds: this.config.alertThresholds
       });
     } catch (error) {
-      logger.warn('Failed to initialize MetricsManager, using fallback metrics:', { 
-        error: error.message, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.warn('Failed to initialize MetricsManager, using fallback metrics:', {
+        error: error.message,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       this.metrics = {
         recordHttpRequest: () => {},
@@ -166,23 +230,22 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
       };
     }
 
-    this.rateLimiter = rateLimiter; // Direct import to avoid initialization issues
+    this.rateLimiter = rateLimiter;
     this._initializeComponents().catch(error => {
-      logger.error('Critical: Failed to initialize components:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Critical: Failed to initialize components:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       process.exit(1);
     });
 
-    // Set up unhandled rejection handler
     process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', { 
-        promise, 
-        reason: reason.message, 
-        stack: reason.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Unhandled Rejection at:', {
+        promise,
+        reason: reason.message,
+        stack: reason.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       if (this.metrics && this.metrics.predictionErrors) {
         this.metrics.predictionErrors.inc({ type: 'unhandled_rejection' });
@@ -191,12 +254,13 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
   }
 
   async _initializeComponents() {
+    const span = this.tracer.startSpan('initialize_components');
     try {
-      // Use global Redis singleton to prevent duplication and circular dependencies
+      // Redis Cluster
       if (!global.redisClient) {
-        global.redisClient = new Redis({
-          host: this.config.redis.host,
-          port: this.config.redis.port,
+        global.redisClient = new Redis.Cluster([
+          { host: this.config.redis.host, port: this.config.redis.port }
+        ], {
           password: this.config.redis.password,
           enableOfflineQueue: this.config.redis.enableOfflineQueue,
           retryStrategy: this.config.redis.retryStrategy,
@@ -207,29 +271,30 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
         });
 
         global.redisClient.on('connect', () => {
-          logger.info('Redis connection established', { 
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+          logger.info('Redis Cluster connection established', {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
         });
 
         global.redisClient.on('error', (error) => {
-          logger.error('Redis connection error:', { 
-            error: error.message, 
-            stack: error.stack, 
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+          logger.error('Redis connection error:', {
+            error: error.message,
+            stack: error.stack,
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
         });
       }
       this.redis = global.redisClient;
 
+      // MongoDB with high availability
       this.client = new MongoClient(this.config.mongoUri, {
-        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
-        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 10,
+        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 100,
+        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 20,
         connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 30000,
         socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 45000,
-        serverSelectionTimeoutMS: 5000,
-        heartbeatFrequencyMS: 30000, // Reduced for quicker detection
-        maxIdleTimeMS: 60000, // 1 minute idle timeout
+        serverSelectionTimeoutMS: 10000,
+        heartbeatFrequencyMS: 15000,
+        maxIdleTimeMS: 30000,
         retryWrites: true,
         retryReads: true,
         serverApi: { version: '1', strict: true, deprecationErrors: true }
@@ -238,13 +303,13 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
       await this.client.connect();
       this.db = this.client.db(this.config.dbName);
       await this.db.command({ ping: 1 });
-      logger.info('MongoDB connection established', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.info('MongoDB connection established', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
 
       this.client.on('serverHeartbeatFailed', (event) => {
-        logger.warn('MongoDB heartbeat failed:', { 
-          metadata: { ...event, service: 'predictive-model', timestamp: new Date().toISOString() } 
+        logger.warn('MongoDB heartbeat failed:', {
+          metadata: { ...event, service: 'predictive-model', timestamp: new Date().toISOString() }
         });
         if (this.metrics && this.metrics.predictionErrors) {
           this.metrics.predictionErrors.inc({ type: 'database_heartbeat' });
@@ -257,49 +322,33 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
         maxKeys: this.config.cache.max
       });
       await this.cache.initialize(this.redis);
-      logger.info('Cache initialized', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.info('Cache initialized', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
 
       this.lock = new AsyncLock({
-        timeout: 5000,
-        maxPending: 1000
+        timeout: 10000,
+        maxPending: 5000
       });
 
-      // Define _executePython method if it doesn't exist
-      if (!this._executePython) {
-        this._executePython = async (data) => {
-          // Validate input to prevent 'data must be a non-null object' errors
-          if (!data || typeof data !== 'object') {
-            throw new Error('Invalid input: data must be a non-null object');
-          }
+      this._executePython = async (data) => {
+        if (!data || typeof data !== 'object') {
+          throw new Error('Invalid input: data must be a non-null object');
+        }
+        if (!data.timestamp) {
+          data.timestamp = new Date().toISOString();
+        }
+        data.request_id = uuidv4();  // Add request tracing
+        const result = await this._executePythonTask(data);
+        return result;
+      };
 
-          // Ensure we have the required PythonBridge
-          if (!global.PythonBridge || typeof global.PythonBridge.runPrediction !== 'function') {
-            logger.error('PythonBridge not available or missing runPrediction method', {
-              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-            });
-            throw new Error('Python bridge not available');
-          }
-
-          // Add timestamp if not present
-          if (!data.timestamp) {
-            data.timestamp = new Date().toISOString();
-          }
-
-          return global.PythonBridge.runPrediction(data, this.config.pythonScript);
-        };
-      }
-
-      // Configure circuit breaker with improved error handling
       this.breaker = new CircuitBreaker(async (data) => await this._executePython(data), {
         timeout: this.config.circuitBreaker.timeout,
         errorThresholdPercentage: this.config.circuitBreaker.errorThresholdPercentage,
         resetTimeout: this.config.circuitBreaker.resetTimeout,
         rollingCountTimeout: this.config.circuitBreaker.rollingCountTimeout,
-        // Improved error filter to handle validation errors
         errorFilter: (error) => {
-          // Don't trip the breaker for validation errors
           if (error.message && error.message.includes('Invalid input')) {
             logger.warn('Validation error filtered from circuit breaker:', {
               error: error.message,
@@ -307,7 +356,6 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
             });
             return true;
           }
-          // Don't trip the breaker for health checks
           if (data && data.type === 'health_check') {
             logger.warn('Health check error filtered from circuit breaker:', {
               error: error.message,
@@ -319,115 +367,259 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
         }
       });
 
-      // Get the global HTTP server from api.js if available
-      let server = null;
-      try {
-        // Try to get the server from the global scope
-        if (global.httpServer && typeof global.httpServer.on === 'function') {
-          server = global.httpServer;
-          logger.info('Using existing global HTTP server for WebSocket', {
+      // Secure HTTP server with Express
+      let server = global.httpServer;
+      if (!server || typeof server.on !== 'function') {
+        const app = express();
+        app.use(helmet());  // Security headers
+        app.use(cors());  // CORS support
+        app.use((req, res, next) => {
+          if (!this._validateAuth(req.headers.authorization)) {
+            return res.status(401).json({ error: 'Unauthorized' });
+          }
+          next();
+        });
+        server = http.createServer(app);
+        global.httpServer = server;
+        const wsPort = parseInt(process.env.WS_PORT, 10) || (this.config.port + 100);
+        server.listen(wsPort, () => {
+          logger.info(`Created new HTTP server for WebSocket on port ${wsPort}`, {
             metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
-        } else {
-          // Create a new HTTP server if needed
-          const http = require('http');
-          const express = require('express');
-          const app = express();
-
-          // Create HTTP server with noServer option to avoid port binding
-          server = http.createServer(app);
-
-          // Store server reference globally for reuse
-          global.httpServer = server;
-
-          // Only listen if we're creating a new server
-          // Use a different port to avoid conflicts with the main API server
-          const wsPort = parseInt(process.env.WS_PORT, 10) || (this.config.port + 100);
-          server.listen(wsPort, () => {
-            logger.info(`Created new HTTP server for WebSocket on port ${wsPort}`, {
-              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-            });
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to get or create HTTP server for WebSocket:', {
-          error: error.message,
-          stack: error.stack,
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
-        throw error;
       }
-
-      // Store server reference for cleanup
       this.httpServer = server;
 
-      // Create WebSocket server on the HTTP server
       this.websocketManager = new WebSocket.Server({
-        server: server, // Use the server we got or created
+        server: server,
         path: process.env.WS_PATH || '/ws',
-        maxPayload: parseInt(process.env.WS_MAX_PAYLOAD, 10) || 52428800, // 50MB from .env
+        maxPayload: parseInt(process.env.WS_MAX_PAYLOAD, 10) || 104857600, // 100MB
         clientTracking: true,
         perMessageDeflate: {
           zlibDeflateOptions: {
-            chunkSize: 1024,
-            memLevel: 7,
-            level: parseInt(process.env.COMPRESSION_LEVEL, 10) || 6
+            chunkSize: 2048,
+            memLevel: 9,
+            level: parseInt(process.env.COMPRESSION_LEVEL, 10) || 9
           },
           zlibInflateOptions: {
-            chunkSize: 10 * 1024
+            chunkSize: 20 * 1024
           },
           threshold: parseInt(process.env.COMPRESSION_THRESHOLD, 10) || 1024
         }
       });
 
-      // No need to start the HTTP server here as it's either already started
-      // or was started in the server creation block above
       this.websocketManager.on('connection', this._handleWebSocketConnection.bind(this));
       this.websocketManager.on('error', this._handleWebSocketError.bind(this));
-      logger.info('WebSocket server initialized', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.info('WebSocket server initialized', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
 
       this._initializeStreaming();
       this._initializeMonitoring();
       this._setupEventHandlers();
 
-      logger.info('All components initialized successfully', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      // Fetch initial data for all supported leagues
+      await this._fetchInitialData();
+
+      logger.info('All components initialized successfully', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
     } catch (error) {
-      logger.error('Failed to initialize components:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Failed to initialize components:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      span.setStatus({ code: 2, message: error.message });
+      span.end();
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  // Fetch data from TheSportsDB API (v1 or v2)
+  // In the fetchSportsDBData method, around line 349-375
+async fetchSportsDBData(endpoint, useV2 = true, params = {}) {
+  const span = this.tracer.startSpan('fetch_sportsdb_data');
+  try {
+    const apiKey = process.env.THESPORTSDB_API_KEY || '447279'; // Added default from screenshot
+    if (!apiKey) {
+      throw new Error('TheSportsDB API key not found in environment variables');
+    }
+
+    let url;
+    if (useV2) {
+      url = `https://www.thesportsdb.com/api/v2/json/${endpoint}`;
+      const response = await fetch(url, {
+        headers: { 'X-API-KEY': apiKey },
+        method: 'GET'
+      });
+      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+      return await response.json();
+    } else {
+      const queryString = new URLSearchParams(params).toString();
+      url = `https://www.thesportsdb.com/api/v1/json/${apiKey}/${endpoint}${queryString ? '?' + queryString : ''}`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+      return await response.json();
+    }
+  } catch (error) {
+    logger.error(`Error fetching data from TheSportsDB (${endpoint}):`, {
+      error: error.message,
+      stack: error.stack,
+      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+    });
+    if (this.metrics && this.metrics.predictionErrors) {
+      this.metrics.predictionErrors.inc({ type: 'api_fetch' });
+    }
+    throw error;
+  } finally {
+    span.end();
+  }
+}
+
+  // Fetch historical events for a league
+  async fetchHistoricalEvents(league, season = '2023-2024') {
+    const span = this.tracer.startSpan('fetch_historical_events');
+    try {
+      const leagueId = this.LEAGUE_IDS[league];
+      if (!leagueId) throw new Error(`Unsupported league: ${league}`);
+
+      const endpoint = 'eventsseason.php';
+      const params = { id: leagueId, s: season };
+      const data = await this.fetchSportsDBData(endpoint, false, params);
+      const events = data.events || [];
+      logger.info(`Fetched ${events.length} historical events for ${league} (${season})`, {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+
+      if (events.length > 0) {
+        const collectionName = `${league.toLowerCase()}_games`;
+        await this.db.collection(collectionName).insertMany(events, { ordered: false });
+        logger.info(`Stored ${events.length} events in MongoDB for ${league}`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      return events;
+    } catch (error) {
+      logger.error(`Error fetching historical events for ${league}:`, {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  // Fetch live scores for a sport
+  async fetchLiveScores(sport) {
+    const span = this.tracer.startSpan('fetch_live_scores');
+    try {
+      const endpoint = `livescore/${sport}`;
+      const data = await this.fetchSportsDBData(endpoint, true);
+      const events = data.events || [];
+      logger.info(`Fetched ${events.length} live ${sport} events`, {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+
+      if (events.length > 0) {
+        await this.db.collection('live_scores').insertMany(events, { ordered: false });
+        logger.info(`Stored ${events.length} live ${sport} events in MongoDB`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+
+        // Map events to their respective leagues and add to streaming queue
+        for (const event of events) {
+          const league = Object.keys(this.SPORT_MAPPING).find(
+            (lg) => this.SPORT_MAPPING[lg] === sport && event.idLeague === this.LEAGUE_IDS[lg]
+          );
+          if (league) {
+            this.streamingQueue.push({
+              league,
+              data: event,
+              timestamp: new Date().toISOString()
+            });
+          }
+        }
+      }
+
+      return events;
+    } catch (error) {
+      logger.error(`Error fetching live scores for ${sport}:`, {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  // Fetch initial data for all leagues during initialization
+  async _fetchInitialData() {
+    const span = this.tracer.startSpan('fetch_initial_data');
+    try {
+      // Fetch historical data for all leagues
+      const historicalPromises = this.SUPPORTED_LEAGUES.map(league =>
+        this.fetchHistoricalEvents(league, '2023-2024')
+      );
+      await Promise.all(historicalPromises);
+
+      // Fetch live scores for unique sports
+      const sports = [...new Set(Object.values(this.SPORT_MAPPING))];
+      const livePromises = sports.map(sport => this.fetchLiveScores(sport));
+      await Promise.all(livePromises);
+
+      logger.info('Initial data fetch completed for all leagues and sports', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+    } catch (error) {
+      logger.error('Error fetching initial data:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      if (this.metrics && this.metrics.predictionErrors) {
+        this.metrics.predictionErrors.inc({ type: 'initial_data_fetch' });
+      }
+    } finally {
+      span.end();
     }
   }
 
   _handleWebSocketConnection(ws) {
+    const span = this.tracer.startSpan('websocket_connection');
     if (this.metrics && this.metrics.activeConnections) {
       this.metrics.activeConnections.inc();
     }
     ws.isAlive = true;
+    ws.subscribedLeagues = [];
 
     ws.on('pong', () => {
       ws.isAlive = true;
     });
 
     ws.on('message', async (message) => {
+      const span = this.tracer.startSpan('websocket_message');
       try {
         const data = JSON.parse(message);
         await this._handleStreamingData(data, ws);
       } catch (error) {
-        logger.error('WebSocket message handling error:', { 
-          error: error.message, 
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+        logger.error('WebSocket message handling error:', {
+          error: error.message,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
         ws.send(JSON.stringify({
           error: 'Invalid message format',
           timestamp: new Date().toISOString()
         }));
+      } finally {
+        span.end();
       }
     });
 
@@ -438,32 +630,35 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
     });
 
     ws.on('error', (error) => {
-      logger.error('WebSocket client error:', { 
-        error: error.message, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('WebSocket client error:', {
+        error: error.message,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       if (this.metrics && this.metrics.predictionErrors) {
         this.metrics.predictionErrors.inc({ type: 'websocket_client' });
       }
     });
+    span.end();
   }
 
   _handleWebSocketError(error) {
-    logger.error('WebSocket server error:', { 
-      error: error.message, 
-      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+    const span = this.tracer.startSpan('websocket_error');
+    logger.error('WebSocket server error:', {
+      error: error.message,
+      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
     });
     if (this.metrics && this.metrics.predictionErrors) {
       this.metrics.predictionErrors.inc({ type: 'websocket_server' });
     }
+    span.end();
   }
 
   async _handleStreamingData(data, ws) {
+    const span = this.tracer.startSpan('handle_streaming_data');
     try {
       if (!this._validateStreamingData(data)) {
         throw new Error('Invalid streaming data format');
       }
-
       if (this.streamingQueue.length >= this.config.streaming.maxQueueSize) {
         this.streamingQueue.shift();
       }
@@ -471,73 +666,94 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
         ...data,
         timestamp: new Date().toISOString()
       });
-
       if (this.streamingQueue.length >= this.config.streaming.batchSize) {
         await this._processStreamingBatch();
       }
-
       ws.send(JSON.stringify({
         status: 'received',
         timestamp: new Date().toISOString()
       }));
     } catch (error) {
-      logger.error('Streaming data handling error:', { 
-        error: error.message, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Streaming data handling error:', {
+        error: error.message,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       ws.send(JSON.stringify({
         error: error.message,
         timestamp: new Date().toISOString()
       }));
+    } finally {
+      span.end();
     }
   }
 
   _initializeStreaming() {
+    const span = this.tracer.startSpan('initialize_streaming');
     try {
       this.streamProcessor = setInterval(() => {
         if (this.streamingQueue.length > 0 && !this.isShuttingDown) {
           this._processStreamingBatch().catch(error => {
-            logger.error('Streaming batch processing error:', { 
-              error: error.message, 
-              stack: error.stack, 
-              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+            logger.error('Streaming batch processing error:', {
+              error: error.message,
+              stack: error.stack,
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
             });
           });
         }
       }, this.config.streaming.interval);
 
-      this.intervals = this.intervals || [];
-      this.intervals.push(this.streamProcessor);
+      // Add periodic live score fetching
+      this.liveScoreProcessor = setInterval(async () => {
+        try {
+          const sports = [...new Set(Object.values(this.SPORT_MAPPING))];
+          for (const sport of sports) {
+            await this.fetchLiveScores(sport);
+          }
+        } catch (error) {
+          logger.error('Periodic live score fetch error:', {
+            error: error.message,
+            stack: error.stack,
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+        }
+      }, 120000); // Fetch every 2 minutes (matches 2-min delay of live scores)
 
-      logger.info('Streaming initialization completed', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      this.intervals = this.intervals || [];
+      this.intervals.push(this.streamProcessor, this.liveScoreProcessor);
+      logger.info('Streaming initialization completed', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
     } catch (error) {
-      logger.error('Failed to initialize streaming:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Failed to initialize streaming:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
+      span.setStatus({ code: 2, message: error.message });
+      span.end();
       throw error;
+    } finally {
+      span.end();
     }
   }
 
   _initializeMonitoring() {
+    const span = this.tracer.startSpan('initialize_monitoring');
     setInterval(async () => {
       try {
         const health = await this.healthCheck();
         if (health.status !== 'healthy') {
-          logger.warn('Health check failed:', { 
-            health, 
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+          logger.warn('Health check failed:', {
+            health,
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
           this.emit('health:degraded', health);
         }
       } catch (error) {
-        logger.error('Health check error:', { 
-          error: error.message, 
-          stack: error.stack, 
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+        logger.error('Health check error:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
       }
     }, this.config.monitoring.healthCheckInterval);
@@ -546,41 +762,27 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
       try {
         this._collectMetrics();
       } catch (error) {
-        logger.error('Metrics collection error:', { 
-          error: error.message, 
-          stack: error.stack, 
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+        logger.error('Metrics collection error:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
       }
     }, this.config.monitoring.metricsInterval);
 
-    // Memory monitoring with safeguards
     this.memoryMonitorInterval = setInterval(() => {
       try {
         const usage = process.memoryUsage();
-
-        // Record metrics if available
         if (this.metrics) {
-          // Check if memoryUsage.set exists
           if (this.metrics.memoryUsage && typeof this.metrics.memoryUsage.set === 'function') {
             this.metrics.memoryUsage.set(usage.heapUsed);
           }
-
-          // Check if recordMemoryUsage exists
           if (typeof this.metrics.recordMemoryUsage === 'function') {
             this.metrics.recordMemoryUsage();
-          } else {
-            // If the method doesn't exist, don't try to call it
-            logger.debug('metrics.recordMemoryUsage is not a function, skipping', {
-              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-            });
           }
         }
-
-        // Check for high memory usage
         const memoryThreshold = this.config.alertThresholds.memoryUsage;
         const currentUsage = usage.heapUsed / usage.heapTotal;
-
         if (currentUsage > memoryThreshold) {
           logger.warn('High memory usage detected:', {
             usage: {
@@ -591,8 +793,6 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
             threshold: Math.round(memoryThreshold * 100) + '%',
             metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
-
-          // Perform memory optimization
           this._optimizeMemory(currentUsage);
         }
       } catch (error) {
@@ -602,14 +802,14 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
           metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
       }
-    }, 300000); // 5 minutes, matching .env
-
-    // Add to intervals array for cleanup
+    }, 60000); // 1 minute
     this.intervals = this.intervals || [];
     this.intervals.push(this.memoryMonitorInterval);
+    span.end();
   }
 
   _collectMetrics() {
+    const span = this.tracer.startSpan('collect_metrics');
     try {
       for (const league of this.SUPPORTED_LEAGUES) {
         const leagueMetrics = this.modelMetrics.get(league);
@@ -617,585 +817,603 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
           this.metrics.modelAccuracy.set({ league }, leagueMetrics.accuracy || 0);
         }
       }
-
       if (this.metrics && this.metrics.activeConnections && this.websocketManager) {
         this.metrics.activeConnections.set(this.websocketManager.clients.size);
       }
-
       if (this.metrics && this.metrics.memoryUsage) {
         const memUsage = process.memoryUsage();
         this.metrics.memoryUsage.set(memUsage.heapUsed);
       }
     } catch (error) {
-      logger.error('Metrics collection error:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Metrics collection error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
+    } finally {
+      span.end();
     }
   }
 
   async _processStreamingBatch() {
+    const span = this.tracer.startSpan('process_streaming_batch');
     if (this.streamingQueue.length === 0 || this.isShuttingDown) return;
-
     try {
       const batch = this.streamingQueue.splice(0, this.config.streaming.batchSize);
       const leagueGroups = new Map();
-
       for (const item of batch) {
         if (!leagueGroups.has(item.league)) leagueGroups.set(item.league, []);
         leagueGroups.get(item.league).push(item);
       }
-
       const promises = [];
       for (const [league, data] of leagueGroups) {
         promises.push(this._processBatchForLeague(league, data));
       }
-
       await Promise.all(promises);
     } catch (error) {
-      logger.error('Batch processing error:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+      logger.error('Batch processing error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
       if (this.metrics && this.metrics.predictionErrors) {
         this.metrics.predictionErrors.inc({ type: 'batch_processing' });
       }
+    } finally {
+      span.end();
     }
   }
 
   async _processBatchForLeague(league, data) {
+    const span = this.tracer.startSpan('process_batch_for_league');
     try {
       const result = await this.breaker.fire(async () => await this._executePython({
         type: 'batch_process',
         league,
         data
       }));
-
       this._broadcastResults(league, result);
       return result;
     } catch (error) {
-      logger.error(`League batch processing error for ${league}:`, { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'batch_process' });
-      }
-      throw error;
-    }
-  }
-
-  _broadcastResults(league, results) {
-    if (!this.websocketManager) return;
-
-    const message = JSON.stringify({
-      type: 'batch_results',
-      league,
-      results,
-      timestamp: new Date().toISOString()
-    });
-
-    this.websocketManager.clients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN && client.subscribedLeagues?.includes(league)) {
-        client.send(message);
-      }
-    });
-  }
-
-  _validateStreamingData(data) {
-    return !!(
-      data &&
-      data.league &&
-      this.SUPPORTED_LEAGUES.includes(data.league) &&
-      data.type &&
-      Object.values(this.PREDICTION_TYPES).includes(data.type)
-    );
-  }
-
-  async healthCheck() {
-    try {
-      const health = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        version: '3.0.0',
-        port: this.config.port,
-        components: {
-          database: await this._checkDatabaseHealth(),
-          redis: await this._checkRedisHealth(),
-          websocket: this._checkWebSocketHealth(),
-          cache: await this._checkCacheHealth(),
-          python: await this._checkPythonHealth()
-        },
-        metrics: {
-          activeConnections: this.websocketManager?.clients.size || 0,
-          queueSize: this.streamingQueue.length,
-          memoryUsage: process.memoryUsage(),
-          uptime: process.uptime()
-        }
-      };
-
-      health.status = Object.values(health.components).every(
-        status => status === 'healthy'
-      ) ? 'healthy' : 'degraded';
-
-      // Safely call recordHealthStatus if it exists
-      if (this.metrics && typeof this.metrics.recordHealthStatus === 'function') {
-        try {
-          this.metrics.recordHealthStatus(health);
-        } catch (error) {
-          logger.warn('Error recording health status metrics:', {
-            error: error.message,
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-        }
-      }
-      return health;
-    } catch (error) {
-      logger.error('Health check failed:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      return {
-        status: 'unhealthy',
-        timestamp: new Date().toISOString(),
-        error: error.message
-      };
-    }
-  }
-
-  async _checkDatabaseHealth() {
-    try {
-      if (!this.client) return 'unhealthy';
-      await this.client.db().admin().ping();
-      return 'healthy';
-    } catch (error) {
-      logger.error('Database health check failed:', { 
-        error: error.message, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'database_health' });
-      }
-      return 'unhealthy';
-    }
-  }
-
-  async _checkRedisHealth() {
-    try {
-      if (!this.redis) return 'unhealthy';
-      await this.redis.ping();
-      return 'healthy';
-    } catch (error) {
-      logger.error('Redis health check failed:', { 
-        error: error.message, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'redis_health' });
-      }
-      return 'unhealthy';
-    }
-  }
-
-  async _checkWebSocketHealth() {
-    try {
-      return this.websocketManager && !this.isShuttingDown ? 'healthy' : 'unhealthy';
-    } catch (error) {
-      logger.error('WebSocket health check failed:', { 
-        error: error.message, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'websocket_health' });
-      }
-      return 'unhealthy';
-    }
-  }
-
-  async _checkCacheHealth() {
-    try {
-      if (!this.cache || !this.cache.has || !this.cache.set || !this.cache.get) {
-        logger.error('Cache object is invalid or missing required methods', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-        return 'unhealthy';
-      }
-      await this.cache.set('_health_check_', 'ok', 5); // 5 seconds TTL
-      const result = await this.cache.get('_health_check_');
-      return result === 'ok' ? 'healthy' : 'unhealthy';
-    } catch (error) {
-      logger.error('Cache health check failed:', {
-        error: error.message,
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'cache_health' });
-      }
-      return 'unhealthy';
-    }
-  }
-
-  /**
-   * Check Python component health
-   * @returns {Promise<string>} Health status: 'healthy' or 'unhealthy'
-   */
-  async _checkPythonHealth() {
-    try {
-      // First, try a direct Python check using child_process
-      // This bypasses PythonBridge and its validation
-      try {
-        const fs = require('fs');
-        const pythonScriptPath = path.resolve(process.cwd(), this.config.pythonScript);
-
-        // Check if Python script exists
-        if (!fs.existsSync(pythonScriptPath)) {
-          logger.warn(`Python script not found at ${pythonScriptPath}`, {
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-          return 'unhealthy';
-        }
-
-        // Simple health check command
-        const { spawn } = require('child_process');
-        const pythonProcess = spawn('python', ['-c', 'print("healthy")']);
-
-        const result = await new Promise((resolve, reject) => {
-          let output = '';
-          let error = '';
-
-          pythonProcess.stdout.on('data', (data) => {
-            output += data.toString();
-          });
-
-          pythonProcess.stderr.on('data', (data) => {
-            error += data.toString();
-          });
-
-          pythonProcess.on('close', (code) => {
-            if (code === 0) {
-              resolve(output.trim());
-            } else {
-              reject(new Error(`Python process exited with code ${code}: ${error}`));
-            }
-          });
-
-          // Set timeout
-          setTimeout(() => {
-            pythonProcess.kill();
-            reject(new Error('Python health check timed out'));
-          }, 5000);
-        });
-
-        if (result === 'healthy') {
-          return 'healthy';
-        }
-      } catch (directError) {
-        logger.debug('Direct Python health check failed, trying PythonBridge:', {
-          error: directError.message,
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-        // Continue to PythonBridge approach
-      }
-
-      // If direct check fails, try with PythonBridge
-      // Create a proper health check object that will pass validation
-      const healthCheckData = {
-        type: 'health_check',
-        timestamp: new Date().toISOString(),
-        data: {
-          command: 'status'
-        }
-      };
-
-      // Check if the circuit breaker is open
-      if (this.breaker && this.breaker.opened) {
-        logger.warn('Circuit breaker is open, Python health check failed', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-        return 'unhealthy';
-      }
-
-      // Try to execute Python health check through PythonBridge
-      try {
-        // Use _executePython directly to bypass circuit breaker
-        if (typeof this._executePython === 'function') {
-          const result = await this._executePython(healthCheckData);
-          return result && result.status === 'ok' ? 'healthy' : 'unhealthy';
-        } else {
-          logger.warn('_executePython method not available', {
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-          return 'unhealthy';
-        }
-      } catch (error) {
-        logger.error('PythonBridge health check failed:', {
-          error: error.message,
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-        return 'unhealthy';
-      }
-    } catch (error) {
-      logger.error('Python health check failed:', {
-        error: error.message,
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'python_health' });
-      }
-      return 'unhealthy';
-    }
-  }
-
-  async cleanup() {
-    try {
-      this.isShuttingDown = true;
-      logger.info('Starting graceful shutdown...', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-
-      // Close WebSocket connections
-      if (this.websocketManager) {
-        for (const client of this.websocketManager.clients) {
-          client.close(1000, 'Server shutting down');
-        }
-        this.websocketManager.close();
-        logger.info('WebSocket connections closed', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-      }
-
-      // Close HTTP server if it exists
-      if (this.httpServer) {
-        await new Promise(resolve => {
-          this.httpServer.close(resolve);
-        });
-        logger.info('WebSocket HTTP server closed', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-      }
-
-      if (this.client) {
-        await this.client.close(true);
-        logger.info('MongoDB connection closed', { 
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-        });
-      }
-
-      // Safely close Redis connection with error handling
-      if (this.redis) {
-        try {
-          // Check if Redis is still connected before quitting
-          if (this.redis.status === 'ready' || this.redis.status === 'connect') {
-            // Use quit() for graceful shutdown
-            await this.redis.quit().catch(err => {
-              logger.warn('Redis quit error (non-fatal):', {
-                error: err.message,
-                metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-              });
-            });
-          } else if (this.redis.status === 'end' || this.redis.status === 'close') {
-            logger.info('Redis connection already closed', {
-              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-            });
-          } else {
-            // Force disconnect if quit fails or status is unknown
-            this.redis.disconnect();
-          }
-
-          // Clear the reference
-          this.redis = null;
-          global.redisClient = null;
-
-          logger.info('Redis connection closed', {
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-        } catch (redisError) {
-          logger.warn('Error during Redis shutdown (continuing cleanup):', {
-            error: redisError.message,
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-          // Force null the reference even if there was an error
-          this.redis = null;
-          global.redisClient = null;
-        }
-      }
-
-      if (this.cache) {
-        await this.cache.clear();
-        logger.info('Cache cleared', { 
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-        });
-      }
-
-      this.streamingQueue = [];
-
-      if (this.intervals) {
-        for (const interval of this.intervals) {
-          clearInterval(interval);
-        }
-      }
-
-      if (global.gc) global.gc();
-
-      if (this.metrics && typeof this.metrics.cleanup === 'function') {
-        this.metrics.cleanup();
-      }
-
-      logger.info('Cleanup completed successfully', { 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-    } catch (error) {
-      logger.error('Cleanup failed:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      throw error;
-    }
-  }
-
-  _formatError(error) {
-    return {
-      message: error.message,
-      type: error.constructor.name,
-      timestamp: new Date().toISOString(),
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    };
-  }
-
-  /**
-   * Optimize memory usage when it exceeds thresholds
-   * @param {number} currentUsage - Current memory usage ratio
-   * @private
-   */
-  async _optimizeMemory(currentUsage) {
-    try {
-      logger.info('Starting memory optimization', {
-        currentUsage: Math.round(currentUsage * 100) + '%',
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-      });
-
-      // 1. Clear non-essential caches
-      this.modelCache.clear();
-      this.predictionHistory.clear();
-
-      // 2. Trim streaming queue if it's large
-      if (this.streamingQueue.length > 100) {
-        const removed = this.streamingQueue.length - 100;
-        this.streamingQueue = this.streamingQueue.slice(-100);
-        logger.info(`Removed ${removed} items from streaming queue`, {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-      }
-
-      // 3. Clear model metrics that aren't being used
-      for (const [league, metrics] of this.modelMetrics.entries()) {
-        // Keep only essential metrics
-        if (metrics && typeof metrics === 'object') {
-          Object.keys(metrics).forEach(key => {
-            if (key !== 'accuracy' && key !== 'lastUpdated') {
-              delete metrics[key];
-            }
-          });
-        }
-      }
-
-      // 4. Trigger cache optimization if available
-      if (this.cache && typeof this.cache.performMemoryOptimization === 'function') {
-        await this.cache.performMemoryOptimization(currentUsage, this.config.alertThresholds.memoryUsage);
-      }
-
-      // 5. Force garbage collection if available
-      if (global.gc) {
-        global.gc();
-        logger.info('Garbage collection triggered during memory optimization', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-      }
-
-      // 6. Log memory usage after optimization
-      const newUsage = process.memoryUsage();
-      const newRatio = newUsage.heapUsed / newUsage.heapTotal;
-
-      logger.info('Memory optimization complete', {
-        before: Math.round(currentUsage * 100) + '%',
-        after: Math.round(newRatio * 100) + '%',
-        reduction: Math.round((currentUsage - newRatio) * 100) + '%',
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-      });
-
-    } catch (error) {
-      logger.error('Error during memory optimization:', {
+      logger.error(`League batch processing error for ${league}:`, {
         error: error.message,
         stack: error.stack,
         metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
+      if (this.metrics && this.metrics.predictionErrors) {
+        this.metrics.predictionErrors.inc({ type: 'league_batch_processing' });
+      }
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  _broadcastResults(league, result) {
+    const span = this.tracer.startSpan('broadcast_results');
+    try {
+      if (!this.websocketManager) return;
+      this.websocketManager.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN && client.subscribedLeagues.includes(league)) {
+          client.send(JSON.stringify({
+            league,
+            result,
+            timestamp: new Date().toISOString()
+          }));
+        }
+      });
+      logger.info(`Broadcasted results for ${league} to subscribed clients`, {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+    } catch (error) {
+      logger.error('Broadcast error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+    } finally {
+      span.end();
+    }
+  }
+
+  _validateStreamingData(data) {
+    const span = this.tracer.startSpan('validate_streaming_data');
+    try {
+      if (!data || typeof data !== 'object') return false;
+      if (!data.league || !this.SUPPORTED_LEAGUES.includes(data.league)) return false;
+      if (!data.data || typeof data.data !== 'object') return false;
+      return true;
+    } catch (error) {
+      logger.error('Streaming data validation error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      return false;
+    } finally {
+      span.end();
     }
   }
 
   _setupEventHandlers() {
-    process.on('unhandledRejection', (reason, promise) => {
-      logger.error('Unhandled Rejection at:', { 
-        promise, 
-        reason: reason.message, 
-        stack: reason.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'unhandled_rejection' });
-      }
-    });
-
-    process.on('uncaughtException', (error) => {
-      logger.error('Uncaught Exception:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-      });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'uncaught_exception' });
-      }
-      this.cleanup().finally(() => process.exit(1));
-    });
-
-    ['SIGTERM', 'SIGINT', 'SIGUSR2'].forEach(signal => {
-      process.on(signal, async () => {
-        logger.info(`Received ${signal} signal`, { 
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
+    const span = this.tracer.startSpan('setup_event_handlers');
+    try {
+      this.breaker.on('success', () => {
+        logger.info('Circuit breaker success', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
-        try {
-          await this.cleanup();
-          process.exit(0);
-        } catch (error) {
-          logger.error(`Error during ${signal} cleanup:`, { 
-            error: error.message, 
-            stack: error.stack, 
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() } 
-          });
-          process.exit(1);
+      });
+
+      this.breaker.on('failure', (error) => {
+        logger.error('Circuit breaker failure:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        if (this.metrics && this.metrics.predictionErrors) {
+          this.metrics.predictionErrors.inc({ type: 'circuit_breaker_failure' });
         }
       });
+
+      this.breaker.on('open', () => {
+        logger.warn('Circuit breaker opened', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      });
+
+      this.breaker.on('halfOpen', () => {
+        logger.info('Circuit breaker half-open', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      });
+
+      this.breaker.on('close', () => {
+        logger.info('Circuit breaker closed', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      });
+
+      process.on('SIGINT', this.cleanup.bind(this));
+      process.on('SIGTERM', this.cleanup.bind(this));
+    } catch (error) {
+      logger.error('Failed to setup event handlers:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      span.setStatus({ code: 2, message: error.message });
+      span.end();
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  _validateAuth(authHeader) {
+    const span = this.tracer.startSpan('validate_auth');
+    try {
+      if (!authHeader) {
+        logger.warn('No authorization header provided', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        this.metrics.recordAuthFailure();
+        return false;
+      }
+      const token = authHeader.replace('Bearer ', '');
+      const secretKey = process.env.AUTH_SECRET_KEY;
+      if (!secretKey) {
+        logger.warn('No AUTH_SECRET_KEY set, authentication disabled', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        return true;
+      }
+      try {
+        const decipher = crypto.createDecipher('aes-256-cbc', secretKey);
+        let decrypted = decipher.update(token, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        this.metrics.recordAuthSuccess();
+        return true;
+      } catch (error) {
+        logger.error('Authentication failed:', {
+          error: error.message,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        this.metrics.recordAuthFailure();
+        return false;
+      }
+    } catch (error) {
+      logger.error('Authentication validation error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      return false;
+    } finally {
+      span.end();
+    }
+  }
+
+  async predict(predictionRequest) {
+    const span = this.tracer.startSpan('predict');
+    try {
+      if (!this._validatePredictionRequest(predictionRequest)) {
+        throw new Error('Invalid prediction request');
+      }
+      const cacheKey = this._generateCacheKey(predictionRequest);
+      const cachedResult = await this.cache.get(cacheKey);
+      if (cachedResult) {
+        logger.debug(`Cache hit for prediction: ${cacheKey}`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        return cachedResult;
+      }
+      const result = await this.breaker.fire(async () => await this._executePython(predictionRequest));
+      await this.cache.set(cacheKey, result);
+      if (this.metrics && this.metrics.predictionDuration) {
+        this.metrics.predictionDuration.observe({ league: predictionRequest.league, type: predictionRequest.prediction_type }, 0.1);
+      }
+      return result;
+    } catch (error) {
+      logger.error('Prediction error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      if (this.metrics && this.metrics.predictionErrors) {
+        this.metrics.predictionErrors.inc({ type: 'prediction' });
+      }
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  _validatePredictionRequest(predictionRequest) {
+    const span = this.tracer.startSpan('validate_prediction_request');
+    try {
+      if (!predictionRequest || typeof predictionRequest !== 'object') return false;
+      if (!predictionRequest.league || !this.SUPPORTED_LEAGUES.includes(predictionRequest.league)) return false;
+      if (!predictionRequest.prediction_type || !Object.values(this.PREDICTION_TYPES).includes(predictionRequest.prediction_type)) return false;
+      if (!predictionRequest.input_data || typeof predictionRequest.input_data !== 'object') return false;
+      if (predictionRequest.prediction_type === this.PREDICTION_TYPES.MULTI_FACTOR) {
+        if (!Array.isArray(predictionRequest.factors) || predictionRequest.factors.length > 5) return false;
+        if (!predictionRequest.factors.every(factor => factor.inputData && typeof factor.inputData === 'object')) return false;
+      }
+      return true;
+    } catch (error) {
+      logger.error('Prediction request validation error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      return false;
+    } finally {
+      span.end();
+    }
+  }
+
+  _generateCacheKey(predictionRequest) {
+    const dataString = JSON.stringify(predictionRequest.input_data, Object.keys(predictionRequest.input_data).sort());
+    return `${predictionRequest.league}:${crypto.createHash('sha256').update(dataString).digest('hex')}`;
+  }
+
+  async _executePythonTask(data) {
+    const span = this.tracer.startSpan('execute_python_task');
+    try {
+      const { spawn } = require('child_process');
+      const pythonPath = process.env.PYTHON_PATH || 'python3';
+      const scriptPath = path.resolve(__dirname, this.config.pythonScript);
+      const dataString = JSON.stringify(data);
+      return new Promise((resolve, reject) => {
+        const process = spawn(pythonPath, [scriptPath, dataString], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          env: { ...process.env, PYTHONUNBUFFERED: '1' }
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        process.stdout.on('data', (chunk) => {
+          stdout += chunk.toString();
+        });
+
+        process.stderr.on('data', (chunk) => {
+          stderr += chunk.toString();
+        });
+
+        process.on('error', (error) => {
+          logger.error('Python process error:', {
+            error: error.message,
+            stack: error.stack,
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+          reject(error);
+        });
+
+        process.on('close', (code) => {
+          if (code !== 0) {
+            logger.error('Python process exited with error:', {
+              code,
+              stderr,
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+            });
+            const error = new Error(`Python process exited with code ${code}: ${stderr}`);
+            error.stderr = stderr;
+            reject(error);
+            return;
+          }
+          try {
+            const result = JSON.parse(stdout);
+            if (result.error) {
+              logger.error('Python execution error:', {
+                error: result.error,
+                type: result.type,
+                metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+              });
+              const error = new Error(result.error);
+              error.type = result.type;
+              reject(error);
+            } else {
+              resolve(result);
+            }
+          } catch (error) {
+            logger.error('Python output parsing error:', {
+              error: error.message,
+              stdout,
+              stderr,
+              metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+            });
+            reject(error);
+          }
+        });
+      });
+    } catch (error) {
+      logger.error('Execute Python task error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      throw error;
+    } finally {
+      span.end();
+    }
+  }
+
+  async healthCheck() {
+    const span = this.tracer.startSpan('health_check');
+    try {
+      const checks = {};
+
+      // Database Health
+      try {
+        await this.db.command({ ping: 1 });
+        checks.database = 'healthy';
+      } catch (error) {
+        logger.error('Database health check failed:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        checks.database = 'unhealthy';
+      }
+
+      // Redis Health
+      try {
+        await this.redis.ping();
+        checks.redis = 'healthy';
+      } catch (error) {
+        logger.error('Redis health check failed:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        checks.redis = 'unhealthy';
+      }
+
+      // WebSocket Health
+      checks.websocket = this.websocketManager && this.websocketManager.clients ? 'healthy' : 'unhealthy';
+
+      // Python Backend Health
+      try {
+        const result = await this._executePython({ type: 'environment_check' });
+        checks.python = result.status === 'ok' ? 'healthy' : 'unhealthy';
+      } catch (error) {
+        logger.error('Python backend health check failed:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        checks.python = 'unhealthy';
+      }
+
+      // TheSportsDB API Health
+      try {
+        await this.fetchSportsDBData('livescore/Soccer', true);
+        checks.sportsDB = 'healthy';
+      } catch (error) {
+        logger.error('TheSportsDB API health check failed:', {
+          error: error.message,
+          stack: error.stack,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        checks.sportsDB = 'unhealthy';
+      }
+
+      const overallStatus = Object.values(checks).every(status => status === 'healthy') ? 'healthy' : 'degraded';
+      if (this.metrics && this.metrics.recordHealthStatus) {
+        this.metrics.recordHealthStatus(overallStatus);
+      }
+
+      return {
+        status: overallStatus,
+        components: checks,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error('Health check error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      return {
+        status: 'unhealthy',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      };
+    } finally {
+      span.end();
+    }
+  }
+
+  _optimizeMemory(currentUsage) {
+    const span = this.tracer.startSpan('optimize_memory');
+    try {
+      logger.info('Optimizing memory usage...', {
+        currentUsage: Math.round(currentUsage * 100) + '%',
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+
+      if (this.modelCache) {
+        this.modelCache.clear();
+        logger.info('Cleared model cache', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      if (this.streamingQueue.length > this.config.streaming.maxQueueSize / 2) {
+        this.streamingQueue.splice(0, this.streamingQueue.length - this.config.streaming.maxQueueSize / 2);
+        logger.info('Trimmed streaming queue', {
+          newSize: this.streamingQueue.length,
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      if (global.gc) {
+        global.gc();
+        logger.info('Forced garbage collection', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      } else {
+        logger.warn('Garbage collection not exposed, consider running with --expose-gc', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      setTimeout(() => {
+        const newUsage = process.memoryUsage();
+        const newPercentage = newUsage.heapUsed / newUsage.heapTotal;
+        logger.info('Memory usage after optimization:', {
+          usage: {
+            heapUsed: Math.round(newUsage.heapUsed / (1024 * 1024)) + ' MB',
+            heapTotal: Math.round(newUsage.heapTotal / (1024 * 1024)) + ' MB',
+            percentage: Math.round(newPercentage * 100) + '%'
+          },
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }, 5000);
+    } catch (error) {
+      logger.error('Memory optimization error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+    } finally {
+      span.end();
+    }
+  }
+
+  async cleanup() {
+    const span = this.tracer.startSpan('cleanup');
+    if (this.isShuttingDown) return;
+    this.isShuttingDown = true;
+    logger.info('Starting graceful shutdown...', {
+      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
     });
+    try {
+      if (this.websocketManager) {
+        this.websocketManager.close(() => {
+          logger.info('WebSocket server closed', {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+        });
+        this.websocketManager.clients.forEach(client => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.close(1000, 'Server shutting down');
+          }
+        });
+      }
+
+      if (this.httpServer) {
+        this.httpServer.close(() => {
+          logger.info('HTTP server closed', {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+        });
+      }
+
+      if (this.client) {
+        await this.client.close();
+        logger.info('MongoDB connection closed', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      if (this.redis) {
+        await this.redis.quit();
+        logger.info('Redis connection closed', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      if (this.intervals) {
+        this.intervals.forEach(interval => clearInterval(interval));
+        logger.info('Cleared all intervals', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      if (this.cache) {
+        await this.cache.clear();
+        logger.info('Cache cleared', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      this.modelCache.clear();
+      this.lastTrainingTime.clear();
+      this.predictionHistory.clear();
+      this.modelMetrics.clear();
+      this.streamingQueue = [];
+      logger.info('In-memory data structures cleared', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+
+      if (global.gc) {
+        global.gc();
+        logger.info('Final garbage collection performed', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+      }
+
+      logger.info('Shutdown completed successfully', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+    } catch (error) {
+      logger.error('Shutdown error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+    } finally {
+      span.end();
+      process.exit(0);
+    }
   }
 }
 
-// Create singleton instance for Redis
-if (!global.redisClient) {
-  global.redisClient = null;
-}
-
-// Create singleton instance
-const predictiveModel = new TheAnalyzerPredictiveModel();
-
-// Handle cluster mode for production
-if (process.env.NODE_ENV === 'production' && cluster && typeof cluster.isMaster === 'boolean' && cluster.isMaster) {
-  const numWorkers = parseInt(process.env.NODE_CLUSTER_WORKERS, 10) || 2; // 2 workers from .env
-
-  logger.info(`Master cluster setting up ${numWorkers} workers`, {
+if (cluster.isMaster) {
+  const numWorkers = parseInt(process.env.NODE_CLUSTER_WORKERS, 10) || os.cpus().length;
+  logger.info(`Master process starting with ${numWorkers} workers`, {
     metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
   });
 
@@ -1203,49 +1421,70 @@ if (process.env.NODE_ENV === 'production' && cluster && typeof cluster.isMaster 
     cluster.fork();
   }
 
-  cluster.on('online', (worker) => {
-    logger.info(`Worker ${worker.process.pid} is online`, {
+  cluster.on('exit', (worker, code, signal) => {
+    logger.warn(`Worker ${worker.process.pid} died with code ${code} and signal ${signal}`, {
       metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
     });
+    if (!global.isShuttingDown) {
+      logger.info('Spawning new worker', {
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      cluster.fork();
+    }
   });
 
-  cluster.on('exit', (worker, code, signal) => {
-    logger.warn(`Worker ${worker.process.pid} died with code: ${code} and signal: ${signal}`, {
-      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-    });
-    logger.info('Starting a new worker', {
-      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-    });
-    cluster.fork();
+  // Leader election using Redis
+  const redis = new Redis({
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT, 10) || 6379,
+    password: process.env.REDIS_PASSWORD || undefined,
+    retryStrategy: (times) => Math.min(times * 100, 5000)
   });
+
+  const electLeader = async () => {
+    try {
+      const leaderKey = 'predictive_model_leader';
+      const currentTime = Date.now();
+      const acquired = await redis.setnx(leaderKey, currentTime);
+      if (acquired) {
+        await redis.expire(leaderKey, 30);
+        logger.info('Master elected as leader', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        global.isLeader = true;
+      } else {
+        const lastLeaderTime = parseInt(await redis.get(leaderKey) || 0);
+        if (currentTime - lastLeaderTime > 30000) {
+          await redis.set(leaderKey, currentTime);
+          await redis.expire(leaderKey, 30);
+          logger.info('Master took over as leader due to timeout', {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+          global.isLeader = true;
+        } else {
+          logger.info('Master operating as follower', {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+          global.isLeader = false;
+        }
+      }
+    } catch (error) {
+      logger.error('Leader election error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+      });
+      global.isLeader = true; // Default to leader if Redis fails
+    }
+  };
+
+  setInterval(electLeader, 15000); // Check every 15 seconds
+  electLeader();
 } else {
-  predictiveModel._initializeComponents().catch(error => {
-    logger.error('Failed to initialize worker:', {
-      error: error.message,
-      stack: error.stack,
-      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-    });
-    process.exit(1);
+  const model = new TheAnalyzerPredictiveModel();
+  logger.info(`Worker ${process.pid} started`, {
+    metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
   });
 }
 
-// Export singleton instance and types
-module.exports = predictiveModel;
-
-module.exports.PredictionTypes = Object.freeze({
-  SINGLE_FACTOR: 'single_factor',
-  MULTI_FACTOR: 'multi_factor',
-  PLAYER_STATS: 'player_stats',
-  TEAM_PERFORMANCE: 'team_performance',
-  GAME_OUTCOME: 'game_outcome',
-  REAL_TIME: 'real_time',
-  ADVANCED_ANALYTICS: 'advanced_analytics'
-});
-
-module.exports.SupportedLeagues = Object.freeze([
-  'NFL', 'NBA', 'MLB', 'NHL',
-  'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
-]);
-
-// Export Redis client for use in other modules
-module.exports.redisClient = global.redisClient;
+module.exports = TheAnalyzerPredictiveModel;

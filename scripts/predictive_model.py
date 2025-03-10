@@ -30,6 +30,56 @@ from sklearn.feature_selection import SelectFromModel
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.exceptions import NotFittedError
 from sklearn.linear_model import SGDClassifier
+import requests
+import xgboost as xgb
+import lightgbm as lgb
+from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
+import pymongo
+from pymongo.errors import ConnectionFailure, OperationFailure
+from dotenv import load_dotenv
+from sklearn import __version__ as sklearn_version
+import redis
+from prometheus_client import Counter, Histogram, Gauge
+import psutil
+from cachetools import TTLCache, LRUCache
+
+# Suppress warnings
+warnings.filterwarnings('ignore')
+
+# Load environment variables from the .env file in the project root
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+load_dotenv(dotenv_path=dotenv_path)
+
+# Configure advanced logging with reduced verbosity
+def setup_logging():
+    log_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
+    )
+    
+    file_handler = RotatingFileHandler(
+        'predictive_model.log',
+        maxBytes=5*1024*1024,  # 5MB to save disk space
+        backupCount=3
+    )
+    file_handler.setFormatter(log_formatter)
+    
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(log_formatter)
+    
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
+
+logger = setup_logging()
+
+# Metrics setup (matching Node.js Prometheus metrics in api.js)
+PREDICTION_LATENCY = Histogram('prediction_latency_seconds', 'Time spent processing predictions')
+MODEL_ACCURACY = Gauge('model_accuracy', 'Model accuracy by league', ['league'])
+PREDICTION_COUNTER = Counter('predictions_total', 'Total number of predictions', ['league', 'type'])
+ERROR_COUNTER = Counter('prediction_errors_total', 'Total number of prediction errors', ['type'])
 
 # Custom streaming classifier with partial_predict capability
 class StreamingClassifier(SGDClassifier):
@@ -88,56 +138,6 @@ class StreamingPipeline(Pipeline):
             except NotFittedError:
                 return np.zeros(len(X))
 
-import xgboost as xgb
-import lightgbm as lgb
-from hyperopt import fmin, tpe, hp, STATUS_OK, Trials
-import pymongo
-from pymongo.errors import ConnectionFailure, OperationFailure
-from dotenv import load_dotenv
-from sklearn import __version__ as sklearn_version
-import redis
-from prometheus_client import Counter, Histogram, Gauge
-import psutil
-from cachetools import TTLCache, LRUCache
-
-# Suppress warnings
-warnings.filterwarnings('ignore')
-
-# Load environment variables from the .env file in the project root
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
-load_dotenv(dotenv_path=dotenv_path)
-
-# Configure advanced logging with reduced verbosity
-def setup_logging():
-    log_formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - [%(filename)s:%(lineno)d] - %(message)s'
-    )
-    
-    file_handler = RotatingFileHandler(
-        'predictive_model.log',
-        maxBytes=5*1024*1024,  # Reduced to 5MB to save disk space
-        backupCount=3  # Reduced to 3 backups
-    )
-    file_handler.setFormatter(log_formatter)
-    
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(log_formatter)
-    
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)  # Reduced to INFO to minimize logging overhead
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
-    
-    return logger
-
-logger = setup_logging()
-
-# Metrics setup (matching Node.js Prometheus metrics in api.js)
-PREDICTION_LATENCY = Histogram('prediction_latency_seconds', 'Time spent processing predictions')
-MODEL_ACCURACY = Gauge('model_accuracy', 'Model accuracy by league', ['league'])
-PREDICTION_COUNTER = Counter('predictions_total', 'Total number of predictions', ['league', 'type'])
-ERROR_COUNTER = Counter('prediction_errors_total', 'Total number of prediction errors', ['type'])
-
 @dataclass
 class PredictionRequest:
     league: str
@@ -146,21 +146,20 @@ class PredictionRequest:
     factors: Optional[List[Dict]] = None
 
 class MemoryMonitor:
-    def __init__(self, threshold_mb: int = 800):  # Reduced threshold to 800MB
+    def __init__(self, threshold_mb: int = 800):
         self.threshold_mb = threshold_mb
         self.process = psutil.Process()
-        self.consecutive_checks = 0  # Track consecutive high memory detections
+        self.consecutive_checks = 0
         self.last_check_time = time.time()
-        self.check_interval = 60  # Check more frequently - every 1 minute
+        self.check_interval = 60
         self.last_gc_time = 0
-        self.gc_interval = 300  # Allow GC more frequently - every 5 minutes
+        self.gc_interval = 300
 
         # Initialize with a garbage collection
         gc.collect()
         logger.info(f"Initial garbage collection performed during startup")
 
     def check_memory(self) -> bool:
-        # Rate limit checks to reduce overhead
         current_time = time.time()
         if current_time - self.last_check_time < self.check_interval:
             return False
@@ -171,32 +170,22 @@ class MemoryMonitor:
             memory_info = self.process.memory_info()
             memory_mb = memory_info.rss / (1024 * 1024)
 
-            # Only log at debug level to reduce noise
             logger.debug(f"Memory usage: {memory_mb:.1f}MB (threshold: {self.threshold_mb}MB)")
 
-            # More aggressive memory management
             if memory_mb > self.threshold_mb:
                 self.consecutive_checks += 1
 
-                # Perform garbage collection more aggressively
                 if current_time - self.last_gc_time > self.gc_interval:
-                    # Run full garbage collection with all generations
                     gc.collect(2)
                     self.last_gc_time = current_time
-
-                    # Clear any large objects in memory
                     self._clear_caches()
-
                     logger.warning(f'High memory usage detected ({memory_mb:.1f}MB), triggered garbage collection')
-                    self.consecutive_checks = 0  # Reset after collection
+                    self.consecutive_checks = 0
 
-                # If memory is critically high, take more drastic measures
                 if memory_mb > self.threshold_mb * 1.5:
                     logger.error(f'Critical memory usage detected ({memory_mb:.1f}MB), performing emergency cleanup')
-                    gc.collect(2)  # Force collection of all generations
+                    gc.collect(2)
                     self._clear_caches()
-
-                    # Try to reduce memory pressure by clearing module caches
                     for module_name in list(sys.modules.keys()):
                         if module_name not in ('os', 'sys', 'gc', 'time', 'logging', 'psutil'):
                             if module_name in sys.modules:
@@ -207,31 +196,27 @@ class MemoryMonitor:
 
                 return True
             else:
-                self.consecutive_checks = 0  # Reset counter when memory is normal
+                self.consecutive_checks = 0
             return False
         except Exception as e:
             logger.error(f"Memory check failed: {str(e)}")
             return False
 
     def _clear_caches(self):
-        """Clear any caches to free memory"""
-        # Clear pandas cache if it exists
         if hasattr(pd, '_libs') and hasattr(pd._libs, 'hashtable'):
             if hasattr(pd._libs.hashtable, '_clear_caches'):
                 pd._libs.hashtable._clear_caches()
 
-        # Clear numpy cache if it exists
         if hasattr(np, 'core') and hasattr(np.core, '_multiarray_umath'):
             if hasattr(np.core._multiarray_umath, '_clear_caches'):
                 np.core._multiarray_umath._clear_caches()
 
-        # Clear any large global variables that might be cached
         for name in list(globals().keys()):
             if name.startswith('_cache_') or name.endswith('_cache'):
                 globals()[name] = None
 
 class CircuitBreaker:
-    def __init__(self, failure_threshold: int = 3, reset_timeout: int = 120):  # Reduced failure threshold
+    def __init__(self, failure_threshold: int = 3, reset_timeout: int = 120):
         self.failure_threshold = failure_threshold
         self.reset_timeout = reset_timeout
         self.failures = 0
@@ -262,8 +247,8 @@ class CircuitBreaker:
 
 class ModelCache:
     def __init__(self):
-        self.cache = TTLCache(maxsize=50, ttl=int(os.getenv('CACHE_TTL', 1800)))  # Reduced size and TTL to 30 minutes
-        self.prediction_cache = LRUCache(maxsize=500)  # Reduced size
+        self.cache = TTLCache(maxsize=50, ttl=int(os.getenv('CACHE_TTL', 1800)))
+        self.prediction_cache = LRUCache(maxsize=500)
     
     def get_model(self, league: str):
         return self.cache.get(league)
@@ -293,8 +278,28 @@ class TheAnalyzerPredictiveModel:
             'REAL_TIME': 'real_time',
             'ADVANCED_ANALYTICS': 'advanced_analytics'
         }
+        self.LEAGUE_IDS = {
+            'NFL': '4391',
+            'NBA': '4387',
+            'MLB': '4424',
+            'NHL': '4380',
+            'PREMIER_LEAGUE': '4328',
+            'LA_LIGA': '4335',
+            'BUNDESLIGA': '4331',
+            'SERIE_A': '4332'
+        }
+        self.SPORT_MAPPING = {
+            'NFL': 'Football',
+            'NBA': 'Basketball',
+            'MLB': 'Baseball',
+            'NHL': 'Hockey',
+            'PREMIER_LEAGUE': 'Soccer',
+            'LA_LIGA': 'Soccer',
+            'BUNDESLIGA': 'Soccer',
+            'SERIE_A': 'Soccer'
+        }
 
-        # Initialize models and caches with reduced sizes
+        # Initialize models and caches
         self.models = {}
         self.streaming_models = {}
         self.ensemble_models = {}
@@ -304,41 +309,40 @@ class TheAnalyzerPredictiveModel:
         self.last_training_time = {}
         self.training_frequency = {
             league: {
-                'base_days': 14,  # Increased to reduce frequency
+                'base_days': 14,
                 'performance_threshold': 0.85,
-                'min_days': 7,  # Increased to reduce frequency
-                'max_days': 30  # Increased to reduce frequency
+                'min_days': 7,
+                'max_days': 30
             } for league in self.SUPPORTED_LEAGUES
         }
         self.xgb_models = {}
         self.lgb_models = {}
         self.model_cache = ModelCache()
-        self.streaming_queue = None  # Initialize as None, set in predict if needed
-        self.executor = ThreadPoolExecutor(max_workers=2)  # Reduced to lower CPU usage
-        self.circuit_breaker = CircuitBreaker(failure_threshold=3, reset_timeout=120)  # Adjusted for stability
+        self.streaming_queue = None
+        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.circuit_breaker = CircuitBreaker(failure_threshold=3, reset_timeout=120)
         self.memory_monitor = MemoryMonitor(threshold_mb=800)
 
-        # MongoDB connection with reduced pool size and timeouts
+        # MongoDB connection
         mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/sports-analytics')
         self.client = pymongo.MongoClient(mongodb_uri,
-                                         maxPoolSize=int(os.getenv('DB_MAX_POOL_SIZE', 10)),  # Further reduced
-                                         minPoolSize=int(os.getenv('DB_MIN_POOL_SIZE', 1)),   # Minimum pool size
-                                         connectTimeoutMS=int(os.getenv('CONNECT_TIMEOUT_MS', 5000)),  # Reduced timeout
-                                         socketTimeoutMS=int(os.getenv('SOCKET_TIMEOUT_MS', 10000)),  # Reduced timeout
-                                         serverSelectionTimeoutMS=5000,  # Added server selection timeout
-                                         waitQueueTimeoutMS=1000,        # Added wait queue timeout
-                                         retryWrites=True,               # Enable retry writes
-                                         w=1)                            # Reduced write concern
+                                         maxPoolSize=int(os.getenv('DB_MAX_POOL_SIZE', 10)),
+                                         minPoolSize=int(os.getenv('DB_MIN_POOL_SIZE', 1)),
+                                         connectTimeoutMS=int(os.getenv('CONNECT_TIMEOUT_MS', 5000)),
+                                         socketTimeoutMS=int(os.getenv('SOCKET_TIMEOUT_MS', 10000)),
+                                         serverSelectionTimeoutMS=5000,
+                                         waitQueueTimeoutMS=1000,
+                                         retryWrites=True,
+                                         w=1)
         self.db = self.client[os.getenv('MONGODB_DB_NAME', 'sports-analytics')]
         self._verify_mongodb_connection()
 
-        # Redis connection with optimized settings
+        # Redis connection
         try:
             redis_host = os.getenv('REDIS_HOST', 'localhost')
             redis_port = int(os.getenv('REDIS_PORT', 6379))
             redis_password = os.getenv('REDIS_PASSWORD', '')
 
-            # Check if Redis is enabled
             use_redis = os.getenv('USE_REDIS', 'true').lower() == 'true'
 
             if use_redis:
@@ -347,29 +351,26 @@ class TheAnalyzerPredictiveModel:
                     port=redis_port,
                     password=redis_password,
                     decode_responses=True,
-                    socket_timeout=int(os.getenv('REDIS_CONNECT_TIMEOUT', 3000)),  # Reduced timeout
-                    socket_connect_timeout=2000,  # Added connect timeout
+                    socket_timeout=int(os.getenv('REDIS_CONNECT_TIMEOUT', 3000)),
+                    socket_connect_timeout=2000,
                     retry_on_timeout=True,
-                    health_check_interval=30,  # Added health check
-                    max_connections=5,  # Further reduced connections
-                    client_name='predictive_model_py'  # Added client name for tracking
+                    health_check_interval=30,
+                    max_connections=5,
+                    client_name='predictive_model_py'
                 )
-
-                # Test connection with timeout
-                try:
-                    self.redis_client.ping()
-                    logger.info("Redis connection successful")
-                except (redis.ConnectionError, redis.TimeoutError) as e:
-                    logger.warning(f"Redis connection failed: {str(e)}. Using in-memory cache.")
-                    self.redis_client = None
+                self.redis_client.ping()
+                logger.info("Redis connection successful")
             else:
                 logger.info("Redis disabled by configuration. Using in-memory cache.")
                 self.redis_client = None
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            logger.warning(f"Redis connection failed: {str(e)}. Using in-memory cache.")
+            self.redis_client = None
         except Exception as e:
             logger.error(f"Error initializing Redis: {str(e)}")
             self.redis_client = None
 
-        # Initialize monitoring with reduced frequency
+        # Initialize monitoring
         self._start_monitoring()
 
     def _verify_mongodb_connection(self):
@@ -382,19 +383,13 @@ class TheAnalyzerPredictiveModel:
 
     def _start_monitoring(self):
         def monitor_resources():
-            # Wait 5 minutes before first check to avoid startup spikes
-            time.sleep(300)
-
+            time.sleep(300)  # Wait 5 minutes before first check
             while True:
                 try:
-                    if self.memory_monitor.check_memory():
-                        # Memory check already logs at debug level
-                        pass
-                    # Sleep for 30 minutes between checks
-                    time.sleep(1800)
+                    self.memory_monitor.check_memory()
+                    time.sleep(1800)  # Check every 30 minutes
                 except Exception as e:
                     logger.error(f"Error in memory monitoring thread: {str(e)}")
-                    # Sleep for 5 minutes before retrying after error
                     time.sleep(300)
 
         import threading
@@ -406,15 +401,14 @@ class TheAnalyzerPredictiveModel:
     def _verify_python_environment(self):
         """Verify Python environment and required components"""
         try:
-            # Check Python version
             python_version = sys.version_info
-            if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 8):
+            if (python_version.major < 3 or 
+                (python_version.major == 3 and python_version.minor < 8)):
                 return {"status": "error", "message": f"Python 3.8+ required, found {python_version.major}.{python_version.minor}"}
             
-            # Check required libraries
             required_libs = {
                 'numpy': np, 'pandas': pd, 'sklearn': None, 'xgboost': xgb,
-                'lightgbm': lgb, 'pymongo': pymongo
+                'lightgbm': lgb, 'pymongo': pymongo, 'requests': requests
             }
             for lib, module in required_libs.items():
                 try:
@@ -429,19 +423,80 @@ class TheAnalyzerPredictiveModel:
             logger.error(f"Python environment verification failed: {str(e)}")
             return {"status": "error", "message": str(e)}
 
+  # Around line 644-675 in the fetch_sportsdb_data method
+def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
+    api_key = os.getenv('THESPORTSDB_API_KEY', '447279')  # Added default from screenshot
+    if not api_key:
+        raise ValueError("TheSportsDB API key not found in environment variables")
+
+    try:
+        if use_v2:
+            url = f"https://www.thesportsdb.com/api/v2/json/{endpoint}"
+            headers = {'X-API-KEY': api_key}
+            response = requests.get(url, headers=headers, params=params, timeout=10)
+        else:
+            params = params or {}
+            url = f"https://www.thesportsdb.com/api/v1/json/{api_key}/{endpoint}"
+            response = requests.get(url, params=params, timeout=10)
+
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Error fetching SportsDB data: {str(e)}")
+        ERROR_COUNTER.labels(type='api_fetch').inc()
+        raise
+
+    def fetch_historical_events(self, league, season="2023-2024"):
+        try:
+            league_id = self.LEAGUE_IDS.get(league)
+            if not league_id:
+                raise ValueError(f"Unsupported league: {league}")
+
+            endpoint = "eventsseason.php"
+            params = {'id': league_id, 's': season}
+            data = self.fetch_sportsdb_data(endpoint, use_v2=False, params=params)
+            events = data.get('events', [])
+            logger.info(f"Fetched {len(events)} historical events for league {league} ({league_id}), season {season}")
+
+            if events:
+                collection_name = f"{league.lower()}_games"
+                self.db[collection_name].insert_many(events, ordered=False)
+                logger.info(f"Stored {len(events)} events in MongoDB collection {collection_name}")
+
+            return events
+        except Exception as e:
+            logger.error(f"Error fetching historical events for {league}: {str(e)}")
+            ERROR_COUNTER.labels(type='api_fetch').inc()
+            raise
+
+    def fetch_live_scores(self, sport):
+        try:
+            endpoint = f"livescore/{sport}"
+            data = self.fetch_sportsdb_data(endpoint, use_v2=True)
+            events = data.get('events', [])
+            logger.info(f"Fetched {len(events)} live {sport} events")
+
+            if events:
+                self.db['live_scores'].insert_many(events, ordered=False)
+                logger.info(f"Stored {len(events)} live {sport} events in MongoDB")
+
+            return events
+        except Exception as e:
+            logger.error(f"Error fetching live scores for {sport}: {str(e)}")
+            ERROR_COUNTER.labels(type='api_fetch').inc()
+            raise
+
     def predict(self, prediction_request_json: str):
         """Enhanced prediction with comprehensive output, handling JSON input from Node.js"""
         try:
-            # Parse JSON input from Node.js
             prediction_request = json.loads(prediction_request_json)
             request = PredictionRequest(
-                league=prediction_request.get('league', ''),  # Default to empty string if not provided
+                league=prediction_request.get('league', ''),
                 prediction_type=prediction_request.get('prediction_type', ''),
                 input_data=prediction_request.get('input_data', {}),
                 factors=prediction_request.get('factors', None)
             )
 
-            # Validate request with more detailed logging and throttling
             try:
                 self._validate_request(request)
             except ValueError as e:
@@ -456,11 +511,9 @@ class TheAnalyzerPredictiveModel:
                     }
                 }
 
-            # Check circuit breaker
             if not self.circuit_breaker.can_execute():
                 raise Exception("Circuit breaker is open")
             
-            # Check cache with throttling
             cache_key = self._generate_cache_key(request)
             cached_result = self.model_cache.get_prediction(cache_key)
             if cached_result:
@@ -468,18 +521,17 @@ class TheAnalyzerPredictiveModel:
                 PREDICTION_COUNTER.labels(league=request.league, type=request.prediction_type).inc()
                 return cached_result
 
-            # Add prediction throttling
-            last_prediction = self.redis_client.get(f"lastPrediction:{request.league}")
-            if last_prediction and (datetime.now() - datetime.fromtimestamp(float(last_prediction))).seconds < 5:  # 5-second cooldown
-                raise ValueError("Prediction rate limit exceeded")
+            if self.redis_client:
+                last_prediction = self.redis_client.get(f"lastPrediction:{request.league}")
+                if last_prediction and (datetime.now() - datetime.fromtimestamp(float(last_prediction))).seconds < 5:
+                    raise ValueError("Prediction rate limit exceeded")
 
-            # Process prediction
             result = self._process_prediction(request)
             
-            # Update metrics and cache
             PREDICTION_COUNTER.labels(league=request.league, type=request.prediction_type).inc()
             self.model_cache.set_prediction(cache_key, result)
-            self.redis_client.set(f"lastPrediction:{request.league}", datetime.now().timestamp(), ex=300)  # 5-minute TTL
+            if self.redis_client:
+                self.redis_client.set(f"lastPrediction:{request.league}", datetime.now().timestamp(), ex=300)
 
             self.circuit_breaker.record_success()
             return result
@@ -519,7 +571,7 @@ class TheAnalyzerPredictiveModel:
         return f"pred:{prediction_request.league}:{hash(str(prediction_request.input_data))}"
 
     def _process_prediction(self, request: PredictionRequest):
-        """Process prediction request with enhanced features, synchronously"""
+        """Process prediction request with enhanced features"""
         try:
             if request.prediction_type == 'health_check':
                 return self._verify_python_environment()
@@ -529,6 +581,12 @@ class TheAnalyzerPredictiveModel:
                 return self._multi_factor_prediction(request.league, request.factors)
             elif request.prediction_type == self.PREDICTION_TYPES['REAL_TIME']:
                 return self._real_time_prediction(request.league, request.input_data)
+            elif request.prediction_type == self.PREDICTION_TYPES['PLAYER_STATS']:
+                return self._player_stats_prediction(request.league, request.input_data)
+            elif request.prediction_type == self.PREDICTION_TYPES['TEAM_PERFORMANCE']:
+                return self._team_performance_prediction(request.league, request.input_data)
+            elif request.prediction_type == self.PREDICTION_TYPES['GAME_OUTCOME']:
+                return self._game_outcome_prediction(request.league, request.input_data)
             else:
                 return self._advanced_prediction(request.league, request.input_data)
         except Exception as e:
@@ -536,21 +594,20 @@ class TheAnalyzerPredictiveModel:
             raise
 
     def _single_factor_prediction(self, league, input_data):
-        """Perform single factor prediction with enhanced features, synchronously"""
+        """Perform single factor prediction with enhanced features"""
         try:
             model = self.models.get(league)
             if not model:
-                if not self._needs_training(league, force=False):  # Check before training
+                if not self._needs_training(league, force=False):
                     return self.model_cache.get_prediction(self._generate_cache_key(PredictionRequest(league, 'SINGLE_FACTOR', input_data, None))) or {}
                 model = self._train_model(league)
 
-            # Ensure input_data is a DataFrame
             df = pd.DataFrame([input_data])
             prediction = model.predict(df)[0]
-            probabilities = model.predict_proba(df)[0]
+            probabilities = model.predict_proba(df)[0] if hasattr(model, 'predict_proba') else [0.5, 0.5]
             
             result = {
-                'mainPrediction': prediction,
+                'mainPrediction': int(prediction),
                 'confidenceScore': float(max(probabilities) * 100),
                 'insights': self._generate_insights(league, input_data),
                 'metadata': {
@@ -560,7 +617,7 @@ class TheAnalyzerPredictiveModel:
                 }
             }
 
-            PREDICTION_LATENCY.observe(min(1.0, (datetime.now() - datetime.fromtimestamp(0)).total_seconds()))  # Cap latency metric
+            PREDICTION_LATENCY.observe(min(1.0, (datetime.now() - datetime.fromtimestamp(0)).total_seconds()))
             return result
 
         except Exception as e:
@@ -568,7 +625,7 @@ class TheAnalyzerPredictiveModel:
             raise
 
     def _multi_factor_prediction(self, league, factors):
-        """Perform multi-factor prediction with enhanced features, synchronously"""
+        """Perform multi-factor prediction with enhanced features"""
         try:
             predictions = []
             weights = []
@@ -585,7 +642,6 @@ class TheAnalyzerPredictiveModel:
             if not predictions:
                 raise ValueError("No valid predictions could be made")
 
-            # Weighted combination of predictions
             weighted_prob = np.average(
                 [p['confidenceScore'] / 100 for p in predictions],
                 weights=weights
@@ -602,7 +658,7 @@ class TheAnalyzerPredictiveModel:
                 }
             }
 
-            PREDICTION_LATENCY.observe(min(1.0, (datetime.now() - datetime.fromtimestamp(0)).total_seconds()))  # Cap latency metric
+            PREDICTION_LATENCY.observe(min(1.0, (datetime.now() - datetime.fromtimestamp(0)).total_seconds()))
             return result
 
         except Exception as e:
@@ -610,59 +666,178 @@ class TheAnalyzerPredictiveModel:
             raise
 
     def _real_time_prediction(self, league, input_data):
-        """Perform real-time prediction with streaming data, synchronously"""
+        """Perform real-time prediction with streaming data using live scores"""
         try:
-            # Create streaming queue if not already initialized
             if self.streaming_queue is None:
                 self.streaming_queue = []
 
-            # Add to streaming queue synchronously with throttling
-            if len(self.streaming_queue) < 1000:  # Limit queue size
-                self.streaming_queue.append({
-                    'league': league,
-                    'data': input_data,
-                    'timestamp': datetime.now().isoformat()
-                })
+            # Fetch recent live scores for the sport
+            sport = self.SPORT_MAPPING.get(league)
+            if not sport:
+                raise ValueError(f"No sport mapping for league {league}")
 
-            # Process batch if queue size exceeds batchSize, but only every 10 seconds
-            if len(self.streaming_queue) >= 50 and (datetime.now() - datetime.fromtimestamp(self.redis_client.get(f"lastStreamingBatch:{league}") or 0)).seconds >= 10:
+            # Check MongoDB for recent live scores
+            live_events = list(self.db['live_scores'].find(
+                {'strSport': sport},
+                sort=[('timestamp', -1)],
+                limit=10
+            ))
+
+            # If no recent live scores, fetch them
+            if not live_events:
+                live_events = self.fetch_live_scores(sport)
+
+            # Process live events into streaming queue
+            for event in live_events:
+                if len(self.streaming_queue) < 1000:
+                    self.streaming_queue.append({
+                        'league': league,
+                        'data': event,
+                        'timestamp': datetime.now().isoformat()
+                    })
+
+            # Process batch if queue size exceeds batchSize
+            if len(self.streaming_queue) >= 50 and (datetime.now() - datetime.fromtimestamp(float(self.redis_client.get(f"lastStreamingBatch:{league}") or 0))).seconds >= 10:
                 self._process_streaming_batch(league, self.streaming_queue[:50])
                 self.streaming_queue = self.streaming_queue[50:]
-                self.redis_client.set(f"lastStreamingBatch:{league}", datetime.now().timestamp(), ex=600)  # 10-minute TTL
+                if self.redis_client:
+                    self.redis_client.set(f"lastStreamingBatch:{league}", datetime.now().timestamp(), ex=600)
 
             # Get streaming model prediction
             if league in self.streaming_models:
                 df = pd.DataFrame([input_data])
                 prediction = self.streaming_models[league].partial_predict(df)[0]
                 return {
-                    'prediction': prediction,
+                    'prediction': int(prediction),
                     'type': 'real-time',
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now().isoformat(),
+                    'liveEventsProcessed': len(live_events)
                 }
             else:
-                # Fallback to regular prediction
                 return self._single_factor_prediction(league, input_data)
 
         except Exception as e:
             logger.error(f"Real-time prediction error for {league}: {str(e)}")
             raise
 
-    def _advanced_prediction(self, league, input_data):
-        """Perform advanced prediction with ensemble methods, synchronously"""
+    def _player_stats_prediction(self, league, input_data):
+        """Predict based on player statistics"""
         try:
-            # Get predictions from multiple models synchronously with throttling
+            player_id = input_data.get('playerId')
+            if not player_id:
+                raise ValueError("playerId is required for player_stats prediction")
+
+            features = self._prepare_player_stats_data(player_id, league)
+            model = self.models.get(league)
+            if not model:
+                model = self._train_model(league)
+
+            df = pd.DataFrame([features])
+            prediction = model.predict(df)[0]
+            probabilities = model.predict_proba(df)[0] if hasattr(model, 'predict_proba') else [0.5, 0.5]
+
+            return {
+                'prediction': int(prediction),
+                'confidenceScore': float(max(probabilities) * 100),
+                'type': 'player_stats',
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'playerId': player_id
+                }
+            }
+        except Exception as e:
+            logger.error(f"Player stats prediction error for {league}: {str(e)}")
+            raise
+
+    def _team_performance_prediction(self, league, input_data):
+        """Predict team performance based on recent games"""
+        try:
+            team = input_data.get('team')
+            if not team:
+                raise ValueError("team is required for team_performance prediction")
+
+            collection = self.db[f"{league.lower()}_games"]
+            recent_games = list(collection.find(
+                {'$or': [{'strHomeTeam': team}, {'strAwayTeam': team}]},
+                sort=[('dateEvent', -1)],
+                limit=10
+            ))
+
+            if not recent_games:
+                raise ValueError(f"No recent games found for team {team} in league {league}")
+
+            features = self._extract_team_features(pd.DataFrame(recent_games), league)
+            model = self.models.get(league)
+            if not model:
+                model = self._train_model(league)
+
+            df = pd.DataFrame([features])
+            prediction = model.predict(df)[0]
+            probabilities = model.predict_proba(df)[0] if hasattr(model, 'predict_proba') else [0.5, 0.5]
+
+            return {
+                'prediction': int(prediction),
+                'confidenceScore': float(max(probabilities) * 100),
+                'type': 'team_performance',
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'team': team,
+                    'gamesAnalyzed': len(recent_games)
+                }
+            }
+        except Exception as e:
+            logger.error(f"Team performance prediction error for {league}: {str(e)}")
+            raise
+
+    def _game_outcome_prediction(self, league, input_data):
+        """Predict the outcome of a specific game"""
+        try:
+            event_id = input_data.get('eventId')
+            if not event_id:
+                raise ValueError("eventId is required for game_outcome prediction")
+
+            collection = self.db[f"{league.lower()}_games"]
+            event = collection.find_one({'idEvent': event_id})
+            if not event:
+                raise ValueError(f"Event {event_id} not found in league {league}")
+
+            features = self._extract_game_features(event, league)
+            model = self.models.get(league)
+            if not model:
+                model = self._train_model(league)
+
+            df = pd.DataFrame([features])
+            prediction = model.predict(df)[0]
+            probabilities = model.predict_proba(df)[0] if hasattr(model, 'predict_proba') else [0.5, 0.5]
+
+            return {
+                'prediction': int(prediction),  # 1 for home win, 0 for away win/draw
+                'confidenceScore': float(max(probabilities) * 100),
+                'type': 'game_outcome',
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'eventId': event_id,
+                    'teams': f"{event.get('strHomeTeam')} vs {event.get('strAwayTeam')}"
+                }
+            }
+        except Exception as e:
+            logger.error(f"Game outcome prediction error for {league}: {str(e)}")
+            raise
+
+    def _advanced_prediction(self, league, input_data):
+        """Perform advanced prediction with ensemble methods"""
+        try:
             predictions = [
                 self._get_base_prediction(league, input_data),
                 self._get_ensemble_prediction(league, input_data),
                 self._get_streaming_prediction(league, input_data)
             ]
 
-            # Filter out None values and combine with weighted voting
             valid_predictions = [p for p in predictions if p]
             if not valid_predictions:
                 raise ValueError("No valid predictions from models")
 
-            weights = [0.4, 0.4, 0.2]  # Base, Ensemble, Streaming weights
+            weights = [0.4, 0.4, 0.2]
             final_prediction = np.average(
                 [p['prediction'] for p in valid_predictions],
                 weights=[w for w, p in zip(weights, predictions) if p]
@@ -684,7 +859,7 @@ class TheAnalyzerPredictiveModel:
             raise
 
     def _get_base_prediction(self, league, input_data):
-        """Get prediction from base model, synchronously"""
+        """Get prediction from base model"""
         try:
             model = self.models.get(league)
             if not model:
@@ -702,7 +877,7 @@ class TheAnalyzerPredictiveModel:
             return None
 
     def _get_ensemble_prediction(self, league, input_data):
-        """Get prediction from ensemble model, synchronously"""
+        """Get prediction from ensemble model"""
         try:
             ensemble = self.ensemble_models.get(league)
             if not ensemble:
@@ -720,7 +895,7 @@ class TheAnalyzerPredictiveModel:
             return None
 
     def _get_streaming_prediction(self, league, input_data):
-        """Get prediction from streaming model, synchronously"""
+        """Get prediction from streaming model"""
         try:
             streaming_model = self.streaming_models.get(league)
             if not streaming_model:
@@ -743,21 +918,18 @@ class TheAnalyzerPredictiveModel:
         if not valid_predictions:
             return 0.0
 
-        # Calculate agreement between models
         predictions_array = np.array([p['prediction'] for p in valid_predictions])
         std_dev = np.std(predictions_array)
         mean_pred = np.mean(predictions_array)
         
-        # Convert standard deviation to confidence score
-        confidence = 100 * (1 - min(std_dev / (mean_pred + 1e-10), 1.0))  # Add small epsilon to avoid division by zero
+        confidence = 100 * (1 - min(std_dev / (mean_pred + 1e-10), 1.0))
         return float(confidence)
 
     def _generate_insights(self, league, input_data):
-        """Generate advanced insights from prediction data, synchronously"""
+        """Generate advanced insights from prediction data"""
         try:
             insights = []
             
-            # Feature importance analysis
             if league in self.feature_importance:
                 important_features = self._get_important_features(league, input_data)
                 insights.append({
@@ -765,7 +937,6 @@ class TheAnalyzerPredictiveModel:
                     'data': important_features
                 })
 
-            # Historical trend analysis
             historical_trend = self._analyze_historical_trend(league, input_data)
             if historical_trend:
                 insights.append({
@@ -773,7 +944,6 @@ class TheAnalyzerPredictiveModel:
                     'data': historical_trend
                 })
 
-            # Performance metrics
             if league in self.performance_history:
                 performance = self._get_performance_metrics(league)
                 insights.append({
@@ -805,13 +975,17 @@ class TheAnalyzerPredictiveModel:
         ]
 
     def _analyze_historical_trend(self, league, input_data):
-        """Analyze historical trends for prediction, synchronously"""
+        """Analyze historical trends for prediction"""
         try:
+            team = input_data.get('team') or input_data.get('strHomeTeam') or input_data.get('strAwayTeam')
+            if not team:
+                return None
+
             collection = self.db[f"{league.lower()}_games"]
             recent_games = list(collection.find(
-                {'team': input_data.get('team')},
-                sort=[('date', -1)],
-                limit=5  # Reduced to lower memory and CPU usage
+                {'$or': [{'strHomeTeam': team}, {'strAwayTeam': team}]},
+                sort=[('dateEvent', -1)],
+                limit=5
             ))
 
             if not recent_games:
@@ -820,7 +994,7 @@ class TheAnalyzerPredictiveModel:
             return {
                 'games_analyzed': len(recent_games),
                 'trend': self._calculate_trend(recent_games),
-                'period': '5 games'  # Updated to reflect reduced limit
+                'period': '5 games'
             }
 
         except Exception as e:
@@ -832,7 +1006,11 @@ class TheAnalyzerPredictiveModel:
         if not games:
             return None
 
-        scores = [game.get('score', 0) for game in games]
+        scores = []
+        for game in games:
+            score = game.get('intHomeScore', 0) if game.get('strHomeTeam') == game.get('team') else game.get('intAwayScore', 0)
+            scores.append(int(score) if score else 0)
+
         if not scores:
             return None
 
@@ -850,7 +1028,7 @@ class TheAnalyzerPredictiveModel:
         if not history:
             return None
 
-        recent_metrics = history[-3:]  # Reduced to lower memory usage
+        recent_metrics = history[-3:]
         if not recent_metrics:
             return None
 
@@ -879,133 +1057,61 @@ class TheAnalyzerPredictiveModel:
             'significant': abs(trend) > 0.01
         }
 
-    def _train_model(self, league, force=False):
-        """Train or update model with enhanced features, synchronously with performance optimization"""
-        try:
-            if not force and not self._needs_training(league, force=False):
-                return self.models.get(league)
-
-            # Get training data synchronously with reduced dataset size
-            X, y = self._prepare_training_data(league, limit=500)  # Reduced limit to lower CPU/memory
-            
-            # Create and optimize model with fewer iterations
-            pipeline = self._create_advanced_pipeline(league)
-            best_params = self._optimize_hyperparameters(pipeline, X, y, max_evals=20)  # Reduced max_evals
-            pipeline.set_params(**best_params)
-            
-            # Train base model
-            pipeline.fit(X, y)
-            
-            # XGBoost Model with reduced parameters
-            xgb_model = xgb.XGBRegressor(
-                n_estimators=50,  # Reduced
-                learning_rate=0.1, 
-                max_depth=3,  # Reduced
-                objective='reg:squarederror'
-            )
-            xgb_model.fit(X, y)
-            
-            # LightGBM Model with reduced parameters
-            lgb_model = lgb.LGBMRegressor(
-                n_estimators=50,  # Reduced
-                learning_rate=0.1,
-                max_depth=3,  # Reduced
-                objective='regression'
-            )
-            lgb_model.fit(X, y)
-            
-            # Update model metadata
-            self.feature_importance[league] = self._calculate_feature_importance(pipeline, X.columns)
-            self.models[league] = pipeline
-            self.xgb_models[league] = xgb_model
-            self.lgb_models[league] = lgb_model
-            
-            self.last_training_time[league] = datetime.now()
-            self.model_versions[league] = '1.0.0'  # Update version as needed
-            
-            # Track performance
-            self._track_model_performance(league, pipeline, X, y)
-            
-            # Update streaming model
-            self._update_streaming_model(league, X, y)
-            
-            logger.info(f"Model trained successfully for {league}")
-            return pipeline
-            
-        except Exception as e:
-            logger.error(f"Error training model for {league}: {str(e)}")
-            ERROR_COUNTER.labels(type='training').inc()
-            raise
-
     def _needs_training(self, league, force=False):
-        """Determine if a model needs retraining with reduced frequency"""
-        if league not in self.last_training_time or force:
+        """Determine if the model needs retraining"""
+        if force:
             return True
-        
-        training_config = self.training_frequency.get(league, {
-            'base_days': 14,
-            'performance_threshold': 0.85,
-            'min_days': 7,
-            'max_days': 30
-        })
-        
-        days_since_training = (datetime.now() - self.last_training_time.get(league, datetime.min)).days
-        
-        if days_since_training >= training_config['base_days']:
+
+        if league not in self.last_training_time:
             return True
-        
-        if league in self.performance_history:
-            recent_performance = self.performance_history[league][-1]['accuracy'] if self.performance_history[league] else 0
-            if recent_performance < training_config['performance_threshold']:
-                return True
-        
-        return False
 
-    def _prepare_player_stats_data(self, player_id, league):
-        """Prepare player statistics data for models"""
-        try:
-            collection_name = f"{league.lower()}_player_stats"
-            collection = self.db[collection_name]
+        last_train = self.last_training_time[league]
+        frequency = self.training_frequency[league]
+        days_since_last_train = (datetime.now() - last_train).days
 
-            # Get recent player games
-            player_games = list(collection.find(
-                {'playerId': player_id},
-                sort=[('date', -1)],
-                limit=20  # Use last 20 games
-            ))
+        if days_since_last_train < frequency['min_days']:
+            return False
 
-            if not player_games:
-                raise ValueError(f"No statistics found for player {player_id}")
+        if days_since_last_train > frequency['max_days']:
+            return True
 
-            # Transform into DataFrame for analysis
-            df = pd.DataFrame(player_games)
+        performance = self.performance_history.get(league, [])
+        if not performance:
+            return True
 
-            # Extract relevant features based on sport
-            features = self._extract_player_features(df, league)
+        recent_performance = performance[-1]['accuracy'] if performance else 1.0
+        if recent_performance < frequency['performance_threshold']:
+            return True
 
-            return features
-
-        except Exception as e:
-            logger.error(f"Error preparing player stats: {str(e)}")
-            raise
+        return days_since_last_train >= frequency['base_days']
 
     def _prepare_training_data(self, league, limit=500):
-        """Prepare training data for a specific league, synchronously with reduced dataset size"""
+        """Prepare training data for a specific league using TheSportsDB data"""
         try:
-            collection = self.db[f"{league.lower()}_games"]
+            collection_name = f"{league.lower()}_games"
+            collection = self.db[collection_name]
             
             games = list(collection.find(
-                {'status': 'completed'},
-                sort=[('date', -1)],
-                limit=limit  # Reduced to lower memory and CPU usage
+                {'strStatus': 'Match Finished'},
+                sort=[('dateEvent', -1)],
+                limit=limit
             ))
 
             if not games:
-                raise ValueError(f"No training data available for {league}")
-            
+                logger.info(f"No games found for {league}, fetching historical data")
+                self.fetch_historical_events(league, '2023-2024')
+                games = list(self.db[collection_name].find(
+                    {'strStatus': 'Match Finished'},
+                    sort=[('dateEvent', -1)],
+                    limit=limit
+                ))
+
+            if not games:
+                raise ValueError(f"No completed games found for {league} after fetching")
+
             df = pd.DataFrame(games)
-            features = self._extract_features(df)
-            target = self._prepare_target(df)
+            features = self._extract_features(df, league)
+            target = self._prepare_target(df, league)
             
             return features, target
         
@@ -1014,50 +1120,296 @@ class TheAnalyzerPredictiveModel:
             ERROR_COUNTER.labels(type='data_preparation').inc()
             raise
 
-    def _extract_features(self, df):
-        """Extract features from the DataFrame with optimization"""
+    def _prepare_player_stats_data(self, player_id, league):
+        """Prepare player statistics data for models"""
         try:
-            features = df.drop(['target', '_id', 'date'], axis=1, errors='ignore')
-            
-            numeric_features = features.select_dtypes(include=['int64', 'float64']).columns.tolist()[:10]  # Limit to top 10 numeric features
-            categorical_features = features.select_dtypes(include=['object', 'category']).columns.tolist()[:5]  # Limit to top 5 categorical features
+            collection_name = f"{league.lower()}_player_stats"
+            collection = self.db[collection_name]
+
+            player_games = list(collection.find(
+                {'playerId': player_id},
+                sort=[('date', -1)],
+                limit=20
+            ))
+
+            if not player_games:
+                raise ValueError(f"No statistics found for player {player_id}")
+
+            df = pd.DataFrame(player_games)
+            features = self._extract_player_features(df, league)
+            return features
+
+        except Exception as e:
+            logger.error(f"Error preparing player stats: {str(e)}")
+            raise
+
+    def _extract_features(self, df, league):
+        """Extract features from the DataFrame tailored to the sport"""
+        try:
+            sport = self.SPORT_MAPPING.get(league)
+            features = {}
+
+            if sport == 'Soccer':
+                features = {
+                    'home_goals': df['intHomeScore'].astype(int),
+                    'away_goals': df['intAwayScore'].astype(int),
+                    'home_shots': df['intHomeShots'].fillna(0).astype(int),
+                    'away_shots': df['intAwayShots'].fillna(0).astype(int),
+                    'home_possession': df['strHomePossession'].str.rstrip('%').astype(float).fillna(50.0),
+                    'away_possession': df['strAwayPossession'].str.rstrip('%').astype(float).fillna(50.0)
+                }
+            elif sport == 'Basketball':
+                features = {
+                    'home_points': df['intHomeScore'].astype(int),
+                    'away_points': df['intAwayScore'].astype(int),
+                    'home_rebounds': df.get('intHomeRebounds', 0).fillna(0).astype(int),
+                    'away_rebounds': df.get('intAwayRebounds', 0).fillna(0).astype(int),
+                    'home_assists': df.get('intHomeAssists', 0).fillna(0).astype(int),
+                    'away_assists': df.get('intAwayAssists', 0).fillna(0).astype(int)
+                }
+            elif sport == 'Football':
+                features = {
+                    'home_yards': df.get('intHomeYards', 0).fillna(0).astype(int),
+                    'away_yards': df.get('intAwayYards', 0).fillna(0).astype(int),
+                    'home_touchdowns': df.get('intHomeTouchdowns', 0).fillna(0).astype(int),
+                    'away_touchdowns': df.get('intAwayTouchdowns', 0).fillna(0).astype(int)
+                }
+            elif sport == 'Baseball':
+                features = {
+                    'home_runs': df['intHomeScore'].astype(int),
+                    'away_runs': df['intAwayScore'].astype(int),
+                    'home_hits': df.get('intHomeHits', 0).fillna(0).astype(int),
+                    'away_hits': df.get('intAwayHits', 0).fillna(0).astype(int)
+                }
+            elif sport == 'Hockey':
+                features = {
+                    'home_goals': df['intHomeScore'].astype(int),
+                    'away_goals': df['intAwayScore'].astype(int),
+                    'home_shots': df.get('intHomeShots', 0).fillna(0).astype(int),
+                    'away_shots': df.get('intAwayShots', 0).fillna(0).astype(int)
+                }
+
+            feature_df = pd.DataFrame(features)
+            numeric_features = feature_df.select_dtypes(include=['int64', 'float64']).columns.tolist()[:10]
+            categorical_features = feature_df.select_dtypes(include=['object', 'category']).columns.tolist()[:5]
             
             preprocessor = ColumnTransformer(
                 transformers=[
                     ('num', StandardScaler(), numeric_features),
-                    ('cat', OneHotEncoder(handle_unknown='ignore', sparse=False), categorical_features)
+                    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), categorical_features)
                 ])
             
-            X = preprocessor.fit_transform(features)
+            X = preprocessor.fit_transform(feature_df)
             return X
         except Exception as e:
-            logger.error(f"Error extracting features: {str(e)}")
+            logger.error(f"Error extracting features for {league}: {str(e)}")
             raise
 
-    def _prepare_target(self, df):
+    def _extract_player_features(self, df, league):
+        """Extract player features based on the sport"""
+        sport = self.SPORT_MAPPING.get(league)
+        features = {}
+
+        if sport == 'Soccer':
+            features = {
+                'goals': df['goals'].mean(),
+                'assists': df['assists'].mean(),
+                'shots': df['shots'].mean(),
+                'minutes_played': df['minutesPlayed'].mean()
+            }
+        elif sport == 'Basketball':
+            features = {
+                'points': df['points'].mean(),
+                'rebounds': df['rebounds'].mean(),
+                'assists': df['assists'].mean(),
+                'minutes_played': df['minutesPlayed'].mean()
+            }
+        elif sport == 'Football':
+            features = {
+                'yards': df['yards'].mean(),
+                'touchdowns': df['touchdowns'].mean(),
+                'carries': df.get('carries', 0).mean(),
+                'receptions': df.get('receptions', 0).mean()
+            }
+        elif sport == 'Baseball':
+            features = {
+                'hits': df['hits'].mean(),
+                'home_runs': df['homeRuns'].mean(),
+                'rbis': df.get('rbis', 0).mean(),
+                'batting_average': df.get('battingAverage', 0).mean()
+            }
+        elif sport == 'Hockey':
+            features = {
+                'goals': df['goals'].mean(),
+                'assists': df['assists'].mean(),
+                'shots': df['shots'].mean(),
+                'ice_time': df.get('iceTime', 0).mean()
+            }
+
+        return features
+
+    def _extract_team_features(self, df, league):
+        """Extract team features based on recent games"""
+        sport = self.SPORT_MAPPING.get(league)
+        features = {}
+
+        if sport == 'Soccer':
+            home_goals = df[df['strHomeTeam'] == df['team']]['intHomeScore'].astype(int).mean()
+            away_goals = df[df['strAwayTeam'] == df['team']]['intAwayScore'].astype(int).mean()
+            features = {
+                'avg_goals': (home_goals + away_goals) / 2,
+                'avg_shots': (df['intHomeShots'].fillna(0).astype(int).mean() + df['intAwayShots'].fillna(0).astype(int).mean()) / 2,
+                'avg_possession': (df['strHomePossession'].str.rstrip('%').astype(float).fillna(50.0).mean() + 
+                                 df['strAwayPossession'].str.rstrip('%').astype(float).fillna(50.0).mean()) / 2
+            }
+        elif sport == 'Basketball':
+            home_points = df[df['strHomeTeam'] == df['team']]['intHomeScore'].astype(int).mean()
+            away_points = df[df['strAwayTeam'] == df['team']]['intAwayScore'].astype(int).mean()
+            features = {
+                'avg_points': (home_points + away_points) / 2,
+                'avg_rebounds': (df.get('intHomeRebounds', 0).fillna(0).astype(int).mean() + 
+                               df.get('intAwayRebounds', 0).fillna(0).astype(int).mean()) / 2,
+                'avg_assists': (df.get('intHomeAssists', 0).fillna(0).astype(int).mean() + 
+                              df.get('intAwayAssists', 0).fillna(0).astype(int).mean()) / 2
+            }
+        elif sport == 'Football':
+            home_yards = df[df['strHomeTeam'] == df['team']].get('intHomeYards', 0).fillna(0).astype(int).mean()
+            away_yards = df[df['strAwayTeam'] == df['team']].get('intAwayYards', 0).fillna(0).astype(int).mean()
+            features = {
+                'avg_yards': (home_yards + away_yards) / 2,
+                'avg_touchdowns': (df.get('intHomeTouchdowns', 0).fillna(0).astype(int).mean() + 
+                                 df.get('intAwayTouchdowns', 0).fillna(0).astype(int).mean()) / 2
+            }
+        elif sport == 'Baseball':
+            home_runs = df[df['strHomeTeam'] == df['team']]['intHomeScore'].astype(int).mean()
+            away_runs = df[df['strAwayTeam'] == df['team']]['intAwayScore'].astype(int).mean()
+            features = {
+                'avg_runs': (home_runs + away_runs) / 2,
+                'avg_hits': (df.get('intHomeHits', 0).fillna(0).astype(int).mean() + 
+                           df.get('intAwayHits', 0).fillna(0).astype(int).mean()) / 2
+            }
+        elif sport == 'Hockey':
+            home_goals = df[df['strHomeTeam'] == df['team']]['intHomeScore'].astype(int).mean()
+            away_goals = df[df['strAwayTeam'] == df['team']]['intAwayScore'].astype(int).mean()
+            features = {
+                'avg_goals': (home_goals + away_goals) / 2,
+                'avg_shots': (df.get('intHomeShots', 0).fillna(0).astype(int).mean() + 
+                            df.get('intAwayShots', 0).fillna(0).astype(int).mean()) / 2
+            }
+
+        return features
+
+    def _extract_game_features(self, event, league):
+        """Extract features for a specific game"""
+        sport = self.SPORT_MAPPING.get(league)
+        features = {}
+
+        if sport == 'Soccer':
+            features = {
+                'home_goals_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeScore'),
+                'away_goals_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayScore'),
+                'home_shots_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeShots'),
+                'away_shots_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayShots'),
+                'home_possession_avg': self._get_team_possession_avg(league, event['strHomeTeam'], 'strHomePossession'),
+                'away_possession_avg': self._get_team_possession_avg(league, event['strAwayTeam'], 'strAwayPossession')
+            }
+        elif sport == 'Basketball':
+            features = {
+                'home_points_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeScore'),
+                'away_points_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayScore'),
+                'home_rebounds_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeRebounds'),
+                'away_rebounds_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayRebounds'),
+                'home_assists_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeAssists'),
+                'away_assists_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayAssists')
+            }
+        elif sport == 'Football':
+            features = {
+                'home_yards_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeYards'),
+                'away_yards_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayYards'),
+                'home_touchdowns_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeTouchdowns'),
+                'away_touchdowns_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayTouchdowns')
+            }
+        elif sport == 'Baseball':
+            features = {
+                'home_runs_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeScore'),
+                'away_runs_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayScore'),
+                'home_hits_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeHits'),
+                'away_hits_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayHits')
+            }
+        elif sport == 'Hockey':
+            features = {
+                'home_goals_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeScore'),
+                'away_goals_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayScore'),
+                'home_shots_avg': self._get_team_avg(league, event['strHomeTeam'], 'intHomeShots'),
+                'away_shots_avg': self._get_team_avg(league, event['strAwayTeam'], 'intAwayShots')
+            }
+
+        return features
+
+    def _get_team_avg(self, league, team, field):
+        """Calculate average for a team field"""
+        collection = self.db[f"{league.lower()}_games"]
+        games = list(collection.find(
+            {'$or': [{'strHomeTeam': team}, {'strAwayTeam': team}]},
+            sort=[('dateEvent', -1)],
+            limit=10
+        ))
+        if not games:
+            return 0
+
+        values = []
+        for game in games:
+            if game.get(field):
+                value = int(game[field]) if game[field].isdigit() else 0
+                values.append(value)
+        return np.mean(values) if values else 0
+
+    def _get_team_possession_avg(self, league, team, field):
+        """Calculate average possession for a team"""
+        collection = self.db[f"{league.lower()}_games"]
+        games = list(collection.find(
+            {'$or': [{'strHomeTeam': team}, {'strAwayTeam': team}]},
+            sort=[('dateEvent', -1)],
+            limit=10
+        ))
+        if not games:
+            return 50.0
+
+        values = []
+        for game in games:
+            if game.get(field):
+                value = float(game[field].rstrip('%')) if game[field] and game[field].rstrip('%').replace('.', '').isdigit() else 50.0
+                values.append(value)
+        return np.mean(values) if values else 50.0
+
+    def _prepare_target(self, df, league):
         """Prepare target variable for training"""
         try:
-            if 'target' in df.columns:
+            sport = self.SPORT_MAPPING.get(league)
+            if sport in ['Soccer', 'Basketball', 'Hockey', 'Baseball', 'Football']:
+                # Target: 1 if home team wins, 0 otherwise
+                df['target'] = df.apply(
+                    lambda row: 1 if int(row['intHomeScore'] or 0) > int(row['intAwayScore'] or 0) else 0,
+                    axis=1
+                )
                 return df['target']
-            elif 'score' in df.columns:
-                return df['score']
             else:
-                raise ValueError("No suitable target variable found")
+                raise ValueError(f"No target preparation defined for sport {sport}")
         except Exception as e:
-            logger.error(f"Error preparing target variable: {str(e)}")
+            logger.error(f"Error preparing target variable for {league}: {str(e)}")
             raise
 
     def _create_advanced_pipeline(self, league):
-        """Create an advanced machine learning pipeline with reduced complexity"""
+        """Create an advanced machine learning pipeline"""
         try:
             base_estimator = RandomForestClassifier(
-                n_estimators=50,  # Reduced
-                max_depth=3,  # Reduced
+                n_estimators=50,
+                max_depth=3,
                 random_state=42
             )
             
             feature_selector = SelectFromModel(
-                GradientBoostingRegressor(n_estimators=50, random_state=42)  # Reduced
+                GradientBoostingRegressor(n_estimators=50, random_state=42)
             )
             
             pipeline = Pipeline([
@@ -1072,13 +1424,13 @@ class TheAnalyzerPredictiveModel:
             raise
 
     def _optimize_hyperparameters(self, pipeline, X, y, max_evals=20):
-        """Optimize hyperparameters using Hyperopt, synchronously with reduced iterations"""
+        """Optimize hyperparameters using Hyperopt"""
         try:
             space = {
-                'classifier__n_estimators': hp.quniform('n_estimators', 20, 100, 10),  # Reduced range
-                'classifier__max_depth': hp.quniform('max_depth', 2, 5, 1),  # Reduced range
-                'classifier__min_samples_split': hp.quniform('min_samples_split', 2, 5, 1),  # Reduced range
-                'classifier__min_samples_leaf': hp.quniform('min_samples_leaf', 1, 3, 1)  # Reduced range
+                'classifier__n_estimators': hp.quniform('n_estimators', 20, 100, 10),
+                'classifier__max_depth': hp.quniform('max_depth', 2, 5, 1),
+                'classifier__min_samples_split': hp.quniform('min_samples_split', 2, 5, 1),
+                'classifier__min_samples_leaf': hp.quniform('min_samples_leaf', 1, 3, 1)
             }
             
             def objective(params):
@@ -1089,7 +1441,7 @@ class TheAnalyzerPredictiveModel:
                     classifier__min_samples_leaf=int(params['min_samples_leaf'])
                 )
                 
-                scores = cross_val_score(pipeline, X, y, cv=3)  # Reduced CV folds
+                scores = cross_val_score(pipeline, X, y, cv=3)
                 return {'loss': -scores.mean(), 'status': STATUS_OK}
             
             trials = Trials()
@@ -1120,7 +1472,7 @@ class TheAnalyzerPredictiveModel:
             }
 
     def _calculate_feature_importance(self, pipeline, feature_names):
-        """Calculate and return feature importance with optimization"""
+        """Calculate and return feature importance"""
         try:
             estimator = pipeline.named_steps['classifier']
             
@@ -1131,7 +1483,7 @@ class TheAnalyzerPredictiveModel:
             else:
                 return {}
             
-            feature_importance = dict(zip(feature_names[:10], importances[:10]))  # Limit to top 10 features
+            feature_importance = dict(zip(feature_names[:10], importances[:10]))
             sorted_importance = dict(
                 sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
             )
@@ -1143,9 +1495,9 @@ class TheAnalyzerPredictiveModel:
             return {}
 
     def _track_model_performance(self, league, model, X, y):
-        """Track and log model performance metrics, synchronously with reduced data"""
+        """Track and log model performance metrics"""
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)  # Reduced test size
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, random_state=42)
             y_pred = model.predict(X_test)
             
             performance = {
@@ -1162,7 +1514,7 @@ class TheAnalyzerPredictiveModel:
             
             self.performance_history[league].append(performance)
             
-            if len(self.performance_history[league]) > 3:  # Reduced history size
+            if len(self.performance_history[league]) > 3:
                 self.performance_history[league] = self.performance_history[league][-3:]
             
             MODEL_ACCURACY.labels(league=league).set(performance['accuracy'])
@@ -1175,32 +1527,80 @@ class TheAnalyzerPredictiveModel:
             ERROR_COUNTER.labels(type='performance_tracking').inc()
             return {}
 
+    def _train_model(self, league):
+        """Train the model for a specific league"""
+        try:
+            X, y = self._prepare_training_data(league)
+            pipeline = self._create_advanced_pipeline(league)
+            best_params = self._optimize_hyperparameters(pipeline, X, y)
+            pipeline.set_params(**best_params)
+            
+            pipeline.fit(X, y)
+            
+            feature_names = [f"feature_{i}" for i in range(X.shape[1])]
+            self.feature_importance[league] = self._calculate_feature_importance(pipeline, feature_names)
+            self._track_model_performance(league, pipeline, X, y)
+            
+            self.models[league] = pipeline
+            self.model_versions[league] = '1.0.0'
+            self.last_training_time[league] = datetime.now()
+            
+            # Train streaming model
+            self._update_streaming_model(league, X, y)
+            
+            # Train ensemble model
+            self._train_ensemble_model(league, X, y)
+            
+            logger.info(f"Model trained successfully for {league}")
+            return pipeline
+        
+        except Exception as e:
+            logger.error(f"Error training model for {league}: {str(e)}")
+            raise
+
     def _update_streaming_model(self, league, X, y):
-        """Update streaming model with new data, synchronously with optimization"""
+        """Update streaming model with new data"""
         try:
             if league not in self.streaming_models:
                 self.streaming_models[league] = self._create_streaming_model()
             
-            # Partial fit with batching to reduce CPU usage
-            batch_size = 50  # Reduced batch size
+            batch_size = 50
             for i in range(0, len(X), batch_size):
-                self.streaming_models[league].partial_fit(X[i:i + batch_size], y[i:i + batch_size])
+                self.streaming_models[league].partial_fit(X[i:i + batch_size], y[i:i + batch_size], classes=np.unique(y))
             logger.info(f"Updated streaming model for {league}")
         
         except Exception as e:
             logger.error(f"Error updating streaming model for {league}: {str(e)}")
             ERROR_COUNTER.labels(type='streaming_update').inc()
 
+    def _train_ensemble_model(self, league, X, y):
+        """Train an ensemble model"""
+        try:
+            rf = RandomForestClassifier(n_estimators=30, max_depth=3, random_state=42)
+            gb = GradientBoostingRegressor(n_estimators=30, random_state=42)
+            ensemble = VotingClassifier(estimators=[
+                ('rf', rf),
+                ('gb', Pipeline([('gb', gb)]))
+            ], voting='soft')
+            
+            ensemble.fit(X, y)
+            self.ensemble_models[league] = ensemble
+            logger.info(f"Ensemble model trained for {league}")
+        
+        except Exception as e:
+            logger.error(f"Error training ensemble model for {league}: {str(e)}")
+            ERROR_COUNTER.labels(type='ensemble_training').inc()
+
     def _create_streaming_model(self):
-        """Create a model suitable for streaming data with reduced complexity"""
+        """Create a model suitable for streaming data"""
         try:
             return StreamingPipeline([
                 ('scaler', StandardScaler()),
                 ('classifier', StreamingClassifier(
-                    loss='log_loss',  # Updated from 'log' which is deprecated
+                    loss='log_loss',
                     learning_rate='adaptive',
-                    max_iter=500,  # Reduced
-                    tol=1e-2,  # Increased tolerance for faster convergence
+                    max_iter=500,
+                    tol=1e-2,
                     random_state=42
                 ))
             ])
@@ -1209,49 +1609,49 @@ class TheAnalyzerPredictiveModel:
             raise
 
     def _process_streaming_batch(self, league, data):
-        """Process a batch of streaming data, synchronously with optimization"""
+        """Process a batch of streaming data"""
         try:
-            if len(data) > 50:  # Limit batch size
+            if len(data) > 50:
                 data = data[:50]
             
             df = pd.DataFrame([d['data'] for d in data])
             if league in self.streaming_models:
-                predictions = self.streaming_models[league].partial_predict(df)
+                X = self._extract_features(df, league)
+                predictions = self.streaming_models[league].partial_predict(X)
                 for pred, item in zip(predictions, data):
-                    self.redis_client.set(f"{os.getenv('REDIS_CACHE_PREFIX', 'sportanalytics:')}streaming:{league}:{item['timestamp']}", json.dumps(pred), ex=300)  # 5-minute TTL
-                    logger.debug(f"Streaming prediction cached for {league} at {item['timestamp']}")
+                    if self.redis_client:
+                        self.redis_client.set(
+                            f"{os.getenv('REDIS_CACHE_PREFIX', 'sportanalytics:')}streaming:{league}:{item['timestamp']}",
+                            json.dumps(int(pred)),
+                            ex=300
+                        )
+                        logger.debug(f"Streaming prediction cached for {league} at {item['timestamp']}")
         except Exception as e:
             logger.error(f"Streaming batch processing error for {league}: {str(e)}")
             ERROR_COUNTER.labels(type='streaming_batch').inc()
 
     def cleanup(self):
-        """Comprehensive cleanup of resources, synchronously with optimization"""
+        """Comprehensive cleanup of resources"""
         try:
-            # Close database connection
             if hasattr(self, 'client'):
                 self.client.close()
                 logger.info("MongoDB connection closed")
 
-            # Close Redis connection
-            if hasattr(self, 'redis_client'):
+            if hasattr(self, 'redis_client') and self.redis_client:
                 self.redis_client.close()
                 logger.info("Redis connection closed")
 
-            # Clear caches
             self.model_cache.cache.clear()
             self.model_cache.prediction_cache.clear()
             logger.info("Model and prediction caches cleared")
 
-            # Stop streaming (if queue exists)
             if self.streaming_queue is not None:
                 self.streaming_queue = []
                 logger.info("Streaming queue cleared")
 
-            # Cleanup executor
             self.executor.shutdown(wait=True, cancel_futures=True)
             logger.info("Thread pool executor shut down")
 
-            # Force garbage collection
             gc.collect()
             logger.info("Garbage collection completed")
 
@@ -1264,7 +1664,6 @@ class TheAnalyzerPredictiveModel:
 # Main execution block for direct script execution (e.g., testing)
 if __name__ == "__main__":
     try:
-        # Initialize signal handlers for direct execution
         def signal_handler(signum, frame):
             logger.info(f"Received signal {signum}")
             if 'model' in locals():
@@ -1274,7 +1673,6 @@ if __name__ == "__main__":
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
-        # Create model instance
         model = TheAnalyzerPredictiveModel()
 
         if len(sys.argv) > 1:
@@ -1285,7 +1683,6 @@ if __name__ == "__main__":
                     result = model._verify_python_environment()
                     print(json.dumps(result))
                 else:
-                    # Run prediction synchronously for direct execution
                     result = model.predict(json.dumps(input_data))
                     print(json.dumps(result))
 
@@ -1318,28 +1715,4 @@ if __name__ == "__main__":
         }))
         sys.exit(1)
 
-import time
-import redis
-
-def connect_to_redis():
-    retries = 5
-    while retries > 0:
-        try:
-            client = redis.StrictRedis(host='localhost', port=6379, db=0)
-            client.ping()
-            logger.info("Connected to Redis")
-            return client
-        except redis.ConnectionError as e:
-            logger.error(f"Redis connection failed: {e}")
-            retries -= 1
-            time.sleep(5)
-    logger.error("Failed to connect to Redis after multiple attempts")
-    return None
-
-redis_client = connect_to_redis()
-
-if not redis_client:
-    logger.error("Exiting script due to Redis connection failure")
-    exit(1)
-
-redis_client = connect_to_redis()
+# Remove duplicate Redis connection code

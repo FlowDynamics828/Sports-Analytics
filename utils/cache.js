@@ -476,13 +476,26 @@ class CacheManager {
       this.checkMemoryUsage(); // Check memory before processing
       this.cache.flushAll();
       if (this.redis) {
-        await this.redis.flushdb();
+        try {
+          await this.redis.flushdb();
+        } catch (redisError) {
+          logger.error('Redis flushdb error:', {
+            error: redisError.message,
+            stack: redisError.stack,
+            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+          });
+          // Attempt to reconnect Redis if the connection is lost
+          if (this.redis.status !== 'ready') {
+            logger.warn('Attempting to reconnect Redis...');
+            await this.initialize(this.redis);
+          }
+        }
       }
     } catch (error) {
-      logger.error('Cache clear error:', { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() } 
+      logger.error('Cache clear error:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
       });
       throw error;
     }

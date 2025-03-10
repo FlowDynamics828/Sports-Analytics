@@ -167,6 +167,14 @@ const logger = winston.createLogger({
   ]
 });
 
+if (!process.env.THESPORTSDB_API_KEY) {
+  process.env.THESPORTSDB_API_KEY = '447279'; // Default from screenshot
+  logger.info('Using default TheSportsDB API key from configuration', {
+    metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+  });
+}
+
+
 // Initialize Prometheus metrics with detailed labels
 const prometheusMetrics = {
   predictionLatency: new prometheus.Histogram({

@@ -131,21 +131,29 @@ async function runAnalyticsPipeline(options = {}) {
       }
     }
     
-    // Update player metrics
-    if (updatePlayerMetrics) {
-      await updatePlayerAdvancedMetrics(db, leaguesToProcess, forceFull);
+    // Process each league
+    for (const league of leaguesToProcess) {
+      try {
+        logger.info(`Processing team metrics for ${league}`);
+        
+        // Get all teams for this league
+        const teams = await db.collection('teams').find({ league }).toArray();
+        
+        if (teams.length === 0) {
+          logger.warn(`No teams found for ${league}, skipping`);
+          continue;
+        }
+        
+        // Process each team
+        for (const team of teams) {
+          // ...existing code...
+        }
+      } catch (error) {
+        logger.error(`Error processing ${league} metrics:`, error);
+      }
     }
-    
-    // Update team metrics
-    if (updateTeamMetrics) {
-      await updateTeamAggregateMetrics(db, leaguesToProcess);
-    }
-    
-    logger.info('Integrated analytics pipeline completed successfully');
-    
   } catch (error) {
-    logger.error('Error in analytics pipeline:', error);
-    throw error;
+    logger.error('Error in integrated analytics pipeline:', error);
   } finally {
     if (client) {
       await client.close();
@@ -290,192 +298,7 @@ async function updateTeamAggregateMetrics(db, leagues) {
         for (const team of teams) {
           try {
             // Find all players on this team (using case-insensitive match for teamId)
-            const teamIdRegex = new RegExp(`^${team.id}// scripts/integrated-analytics-pipeline.js
-require('dotenv').config();
-const { MongoClient } = require('mongodb');
-const path = require('path');
-const fs = require('fs');
-const winston = require('winston');
-const { format } = winston;
-const cron = require('node-cron');
-
-// Import required modules
-const { generateAdvancedMetrics } = require('./metrics-utils');
-const seedPlayerStats = require('./enhanced-seed-player-stats');
-
-// Initialize logger
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: format.combine(
-    format.timestamp(),
-    format.errors({ stack: true }),
-    format.json(),
-    format.metadata()
-  ),
-  defaultMeta: { service: 'analytics-pipeline' },
-  transports: [
-    new winston.transports.File({
-      filename: 'error.log',
-      level: 'error',
-      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 5000000,
-      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 3,
-      tailable: true
-    }),
-    new winston.transports.File({
-      filename: 'combined.log',
-      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 5000000,
-      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 3,
-      tailable: true
-    }),
-    new winston.transports.Console({
-      format: format.combine(
-        format.colorize(),
-        format.simple()
-      )
-    })
-  ]
-});
-
-// MongoDB connection details from .env
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://SportAnalytics:Studyhard%402034@cluster0.et16d.mongodb.net/sports-analytics?retryWrites=true&w=majority&appName=Cluster0';
-const DB_NAME = process.env.MONGODB_DB_NAME || 'sports-analytics';
-
-// Supported leagues
-const SUPPORTED_LEAGUES = [
-  'NFL', 'NBA', 'MLB', 'NHL',
-  'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
-];
-
-/**
- * Run the complete analytics pipeline
- * @param {Object} options - Pipeline configuration options
- */
-async function runAnalyticsPipeline(options = {}) {
-  const {
-    seedData = false,
-    syncExternalData = false,
-    updatePlayerMetrics = true,
-    updateTeamMetrics = true,
-    leagueFilter = null,
-    forceFull = false
-  } = options;
-  
-  logger.info('Starting integrated analytics pipeline', {
-    options,
-    timestamp: new Date().toISOString()
-  });
-  
-  let client = null;
-  
-  try {
-    // Connect to MongoDB
-    client = await MongoClient.connect(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 10,
-      minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 1,
-      connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 5000,
-      socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 10000
-    });
-    
-    logger.info('MongoDB connection established');
-    
-    const db = client.db(DB_NAME);
-    
-    // Determine which leagues to process
-    const leaguesToProcess = leagueFilter ? 
-      SUPPORTED_LEAGUES.filter(league => league === leagueFilter || leagueFilter.includes(league)) : 
-      SUPPORTED_LEAGUES;
-    
-    // Optional: Seed data if requested
-    if (seedData) {
-      logger.info('Seeding player stats data');
-      try {
-        // Check if the seed script exists and import it dynamically
-        const seedScript = require('./enhanced-seed-player-stats');
-        if (typeof seedScript === 'function') {
-          await seedScript();
-        } else if (seedScript && typeof seedScript.seedPlayerStats === 'function') {
-          await seedScript.seedPlayerStats();
-        } else {
-          logger.warn('Seed player stats function not found, skipping seeding step');
-        }
-      } catch (seedError) {
-        logger.error('Error seeding player stats:', seedError);
-      }
-    }
-    
-    // Optional: Sync with external data sources
-    if (syncExternalData) {
-      logger.info('Syncing with external data sources');
-      try {
-        // Check if the sync script exists and import it dynamically
-        const syncScript = require('./sync-player-stats');
-        if (typeof syncScript === 'function') {
-          await syncScript();
-        } else if (syncScript && typeof syncScript.syncPlayerStats === 'function') {
-          await syncScript.syncPlayerStats();
-        } else {
-          logger.warn('Sync player stats function not found, skipping sync step');
-        }
-      } catch (syncError) {
-        logger.error('Error syncing player stats:', syncError);
-      }
-    }
-    
-    // Update player metrics
-    if (updatePlayerMetrics) {
-      await updatePlayerAdvancedMetrics(db, leaguesToProcess, forceFull);
-    }
-    
-    // Update team metrics
-    if (updateTeamMetrics) {
-      await updateTeamAggregateMetrics(db, leaguesToProcess);
-    }
-    
-    logger.info('Integrated analytics pipeline completed successfully');
-    
-  } catch (error) {
-    logger.error('Error in analytics pipeline:', error);
-    throw error;
-  } finally {
-    if (client) {
-      await client.close();
-      logger.info('MongoDB connection closed');
-    }
-  }
-}
-
-/**
- * Update advanced metrics for players
- * @param {Object} db - MongoDB database instance
- * @param {Array} leagues - Leagues to process
- * @param {boolean} forceFull - Force full recalculation for all players
- */
-async function updatePlayerAdvancedMetrics(db, leagues, forceFull = false) {
-  logger.info(`Starting player advanced metrics update for ${leagues.length} leagues`);
-  
-  for (const league of leagues) {
-    try {
-      logger.info(`Processing player metrics for ${league}`);
-      
-      // Player stats collection name
-      const playerCollectionName = `${league.toLowerCase()}_player_stats`;
-      
-      // Find players to update
-      const query = forceFull ? {} : {
-        $or: [
-          { advancedMetrics: { $exists: false } },
-          { advancedMetrics: null },
-          { advancedMetrics: {} }
-        ]
-      };
-      
-      const players = await db.collection(playerCollectionName).find(query).toArray();
-      
-      logger.info(`Found ${players.length} players to update in ${league}`);
-      
-, 'i');
+            const teamIdRegex = new RegExp(`^${team.id}`, 'i');
             const teamPlayers = await db.collection(playerCollectionName).find({ 
               $or: [
                 { teamId: team.id },

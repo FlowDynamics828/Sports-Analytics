@@ -1,326 +1,484 @@
-// Professional Sports Analytics Prediction System
-// Production Version 3.0
+// Dashboard Predictions Integration Component
+// This connects the dashboard to the backend predictive model capabilities
 
-import { DataService } from '/scripts/dataService.js';
-import { Toast } from '/scripts/toast.js';
+import { Toast } from './toast.js';
+import { LoadingState } from './loadingstate.js';
 
 class PredictionManager {
     constructor() {
         this.currentLeague = 'nba';
-        this.predictionModels = new Map();
+        this.selectedTeam = '';
+        this.predictionCache = new Map();
+        this.lastPrediction = null;
         this.confidenceThresholds = {
             high: 0.75,
             medium: 0.6,
             low: 0.5
         };
-        this.updateInterval = null;
-        this.dataCache = new Map();
+        this.predictionElements = {
+            container: document.getElementById('predictionsContainer'),
+            gameOutcome: document.getElementById('gameOutcomeCard'),
+            playerPerformance: document.getElementById('playerPerformanceCard'),
+            trends: document.getElementById('trendsCard'),
+            loading: document.getElementById('predictionsLoading')
+        };
     }
 
     async initialize() {
         try {
-            await this.initializePredictionModels();
-            await this.loadHistoricalData();
-            await this.setupRealTimeUpdates();
-            this.startAutoRefresh();
-            console.log('Prediction system initialized');
-        } catch (error) {
-            console.error('Prediction system initialization error:', error);
-            throw error;
-        }
-    }
-
-    async initializePredictionModels() {
-        const models = {
-            nba: {
-                gameOutcome: this.createNBAGamePredictor(),
-                playerPerformance: this.createNBAPlayerPredictor(),
-                teamTrends: this.createNBATeamTrendAnalyzer()
-            },
-            nfl: {
-                gameOutcome: this.createNFLGamePredictor(),
-                scoring: this.createNFLScoringPredictor(),
-                playerProps: this.createNFLPlayerPropsPredictor()
-            },
-            mlb: {
-                gameOutcome: this.createMLBGamePredictor(),
-                pitchingAnalysis: this.createMLBPitchingPredictor(),
-                battingAnalysis: this.createMLBBattingPredictor()
-            },
-            nhl: {
-                gameOutcome: this.createNHLGamePredictor(),
-                goalScoring: this.createNHLScoringPredictor(),
-                playerImpact: this.createNHLPlayerImpactPredictor()
-            },
-            premierleague: {
-                matchOutcome: this.createSoccerMatchPredictor(),
-                scoreline: this.createSoccerScorelinePredictor(),
-                playerPerformance: this.createSoccerPlayerPredictor()
-            },
-            laliga: {
-                matchOutcome: this.createSoccerMatchPredictor(),
-                scoreline: this.createSoccerScorelinePredictor(),
-                playerPerformance: this.createSoccerPlayerPredictor()
-            },
-            bundesliga: {
-                matchOutcome: this.createSoccerMatchPredictor(),
-                scoreline: this.createSoccerScorelinePredictor(),
-                playerPerformance: this.createSoccerPlayerPredictor()
-            },
-            seriea: {
-                matchOutcome: this.createSoccerMatchPredictor(),
-                scoreline: this.createSoccerScorelinePredictor(),
-                playerPerformance: this.createSoccerPlayerPredictor()
-            }
-        };
-
-        for (const [league, modelSet] of Object.entries(models)) {
-            this.predictionModels.set(league, modelSet);
-        }
-    }
-
-    async loadHistoricalData() {
-        try {
-            const response = await fetch('/api/predictions/historical', {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
+            // Set up event listeners
+            document.getElementById('predictTypeSelect')?.addEventListener('change', (e) => {
+                this.setPredictionType(e.target.value);
+            });
+            
+            document.getElementById('runPredictionBtn')?.addEventListener('click', () => {
+                this.requestPrediction();
             });
 
-            if (!response.ok) throw new Error('Failed to load historical data');
+            // Listen for league/team changes from dashboard
+            window.addEventListener('leagueChange', (e) => {
+                this.setLeague(e.detail.league);
+            });
             
-            const data = await response.json();
-            this.processHistoricalData(data);
+            window.addEventListener('teamChange', (e) => {
+                this.setTeam(e.detail.teamId);
+            });
+
+            console.log('Prediction Manager initialized successfully');
+            return true;
         } catch (error) {
-            console.error('Historical data loading error:', error);
-            throw error;
+            console.error('Failed to initialize Prediction Manager:', error);
+            Toast.show('Failed to initialize prediction system', 'error');
+            return false;
         }
     }
 
-    async getPredictions(league, team = null) {
+    setLeague(league) {
+        this.currentLeague = league;
+        console.log(`Prediction manager: League set to ${league}`);
+        // Clear previous predictions when changing league
+        this.clearPredictions();
+    }
+
+    setTeam(teamId) {
+        this.selectedTeam = teamId;
+        console.log(`Prediction manager: Team set to ${teamId}`);
+        // Clear previous predictions when changing team
+        this.clearPredictions();
+    }
+
+    setPredictionType(type) {
+        this.currentPredictionType = type;
+        console.log(`Prediction type set to ${type}`);
+        
+        // Show/hide relevant inputs based on prediction type
+        if (type === 'multi_factor') {
+            document.getElementById('multiFactorOptions')?.classList.remove('hidden');
+        } else {
+            document.getElementById('multiFactorOptions')?.classList.add('hidden');
+        }
+    }
+
+    async requestPrediction() {
+        if (!this.currentLeague) {
+            Toast.show('Please select a league first', 'warning');
+            return;
+        }
+
         try {
-            const models = this.predictionModels.get(league);
-            if (!models) throw new Error(`No prediction models available for ${league}`);
+            this.showLoading(true);
+            
+            // Generate the cache key
+            const cacheKey = `${this.currentLeague}:${this.selectedTeam}:${this.currentPredictionType}`;
+            
+            // Check cache first (only valid for 5 minutes)
+            const cachedPrediction = this.predictionCache.get(cacheKey);
+            if (cachedPrediction && (Date.now() - cachedPrediction.timestamp < 300000)) {
+                this.displayPrediction(cachedPrediction.data);
+                this.showLoading(false);
+                return;
+            }
 
-            const predictions = await Promise.all([
-                this.getGamePrediction(league, team),
-                this.getPlayerPredictions(league, team),
-                this.getTeamTrendPrediction(league, team)
-            ]);
+            // Prepare prediction request data
+            const requestData = {
+                league: this.currentLeague.toUpperCase(),
+                prediction_type: this.currentPredictionType || 'single_factor',
+                input_data: {
+                    team: this.selectedTeam,
+                    timestamp: new Date().toISOString()
+                }
+            };
 
-            return this.aggregatePredictions(predictions);
+            // For multi-factor predictions, gather additional factors
+            if (this.currentPredictionType === 'multi_factor') {
+                requestData.factors = this.gatherFactors();
+            }
+
+            // Make API request
+            const response = await fetch('/api/predictions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Prediction request failed with status: ${response.status}`);
+            }
+
+            const predictionData = await response.json();
+            
+            // Cache the prediction
+            this.predictionCache.set(cacheKey, {
+                data: predictionData,
+                timestamp: Date.now()
+            });
+            
+            // Display prediction
+            this.displayPrediction(predictionData);
+            this.lastPrediction = predictionData;
+
+            // Save prediction to history
+            this.savePredictionHistory(predictionData);
+            
         } catch (error) {
             console.error('Prediction error:', error);
-            throw error;
+            Toast.show('Failed to generate prediction. Please try again.', 'error');
+        } finally {
+            this.showLoading(false);
         }
     }
 
-    async getGamePrediction(league, team) {
-        const url = `/api/predictions/${league}/game${team ? `?team=${team}` : ''}`;
-        
-        try {
-            const response = await fetch(url, {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
+    gatherFactors() {
+        // Get all factor inputs 
+        const factorElements = document.querySelectorAll('.factor-input');
+        const factors = [];
+
+        factorElements.forEach(element => {
+            const factor = {
+                inputData: {},
+                weight: parseFloat(element.querySelector('.factor-weight').value) || 1.0
+            };
+
+            // Get all input fields for this factor
+            const inputs = element.querySelectorAll('input[data-field]');
+            inputs.forEach(input => {
+                const field = input.dataset.field;
+                const value = input.type === 'number' ? parseFloat(input.value) : input.value;
+                factor.inputData[field] = value;
             });
 
-            if (!response.ok) throw new Error('Failed to fetch game prediction');
-            
-           const data = await response.json();
-            
-            return this.processGamePrediction(data);
-        } catch (error) {
-            console.error('Game prediction error:', error);
-            throw error;
+            factors.push(factor);
+        });
+
+        return factors;
+    }
+
+    displayPrediction(prediction) {
+        // Clear previous predictions
+        this.clearPredictions();
+        
+        if (!prediction) {
+            Toast.show('No prediction data available', 'warning');
+            return;
+        }
+
+        const container = this.predictionElements.container;
+        if (!container) {
+            console.error('Prediction container not found');
+            return;
+        }
+
+        // Show container
+        container.classList.remove('hidden');
+
+        // Create prediction display based on type
+        if (this.currentPredictionType === 'single_factor') {
+            this.displaySingleFactorPrediction(prediction);
+        } else if (this.currentPredictionType === 'multi_factor') {
+            this.displayMultiFactorPrediction(prediction);
+        } else {
+            this.displayAdvancedPrediction(prediction);
+        }
+
+        // Smooth scroll to prediction container
+        container.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    displaySingleFactorPrediction(prediction) {
+        const { mainPrediction, confidenceScore, insights } = prediction;
+        
+        // Game outcome prediction
+        if (this.predictionElements.gameOutcome) {
+            this.predictionElements.gameOutcome.innerHTML = `
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4">Game Outcome Prediction</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <div class="text-3xl font-bold ${this.getConfidenceColorClass(confidenceScore)}">${mainPrediction}</div>
+                            <div class="text-sm text-gray-400">Recommended outcome</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold">${confidenceScore.toFixed(1)}%</div>
+                            <div class="text-sm text-gray-400">Confidence</div>
+                        </div>
+                    </div>
+                    ${this.renderInsights(insights)}
+                </div>
+            `;
+        }
+
+        // Display timestamp and metadata
+        this.displayPredictionMeta(prediction.metadata);
+    }
+
+    displayMultiFactorPrediction(prediction) {
+        const { mainPrediction, combinedProbability, individualPredictions } = prediction;
+        
+        // Game outcome prediction
+        if (this.predictionElements.gameOutcome) {
+            this.predictionElements.gameOutcome.innerHTML = `
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4">Multi-Factor Prediction</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <div class="text-3xl font-bold ${this.getConfidenceColorClass(combinedProbability)}">${mainPrediction.join(', ')}</div>
+                            <div class="text-sm text-gray-400">Combined prediction</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold">${combinedProbability.toFixed(1)}%</div>
+                            <div class="text-sm text-gray-400">Confidence</div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <h4 class="font-bold mb-2">Individual Predictions</h4>
+                        <div class="space-y-2">
+                            ${individualPredictions.map((pred, index) => `
+                                <div class="bg-gray-700 p-3 rounded">
+                                    <div class="flex justify-between">
+                                        <span>Factor ${index + 1}</span>
+                                        <span class="${this.getConfidenceColorClass(pred.confidenceScore)}">${pred.confidenceScore.toFixed(1)}%</span>
+                                    </div>
+                                    <div class="text-sm text-gray-400">Prediction: ${pred.mainPrediction}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Display timestamp and metadata
+        this.displayPredictionMeta(prediction.metadata);
+    }
+
+    displayAdvancedPrediction(prediction) {
+        const { prediction: pred, confidence, components } = prediction;
+        
+        // Game outcome prediction
+        if (this.predictionElements.gameOutcome) {
+            this.predictionElements.gameOutcome.innerHTML = `
+                <div class="bg-gray-800 p-6 rounded-lg shadow-lg">
+                    <h3 class="text-xl font-bold mb-4">Advanced Prediction</h3>
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <div class="text-3xl font-bold ${this.getConfidenceColorClass(confidence)}">${pred}</div>
+                            <div class="text-sm text-gray-400">Advanced prediction</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-2xl font-bold">${confidence.toFixed(1)}%</div>
+                            <div class="text-sm text-gray-400">Confidence</div>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <h4 class="font-bold mb-2">Model Components</h4>
+                        <div class="space-y-2">
+                            ${components.map(comp => `
+                                <div class="bg-gray-700 p-3 rounded">
+                                    <div class="flex justify-between">
+                                        <span>${comp.type} model</span>
+                                        <span>${comp.prediction}</span>
+                                    </div>
+                                    <div class="text-sm text-gray-400">Last updated: ${new Date(comp.timestamp).toLocaleString()}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Display timestamp and metadata
+        this.displayPredictionMeta(prediction.metadata);
+    }
+
+    displayPredictionMeta(metadata) {
+        const metaContainer = document.getElementById('predictionMetadata');
+        if (!metaContainer) return;
+
+        const timestamp = metadata?.timestamp ? new Date(metadata.timestamp).toLocaleString() : 'Unknown';
+        
+        metaContainer.innerHTML = `
+            <div class="text-sm text-gray-400 mt-4">
+                <div>Prediction generated: ${timestamp}</div>
+                <div>Model version: ${metadata?.modelVersion || 'Unknown'}</div>
+                <div>Data points analyzed: ${metadata?.dataPoints || 'Unknown'}</div>
+            </div>
+        `;
+    }
+
+    renderInsights(insights) {
+        if (!insights || !insights.length) return '';
+
+        return `
+            <div class="mt-4 border-t border-gray-700 pt-4">
+                <h4 class="font-bold mb-2">Key Insights</h4>
+                <div class="space-y-2">
+                    ${insights.map(insight => `
+                        <div class="bg-gray-700 p-3 rounded">
+                            <div class="font-semibold">${insight.type}</div>
+                            <div class="text-sm text-gray-400">
+                                ${Array.isArray(insight.data) 
+                                    ? insight.data.map(d => `<div>${d.feature}: ${d.importance}</div>`).join('')
+                                    : JSON.stringify(insight.data)}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    getConfidenceColorClass(score) {
+        if (score >= 75) return 'text-green-500';
+        if (score >= 60) return 'text-yellow-500';
+        return 'text-red-500';
+    }
+
+    clearPredictions() {
+        if (this.predictionElements.gameOutcome) {
+            this.predictionElements.gameOutcome.innerHTML = '';
+        }
+        if (this.predictionElements.playerPerformance) {
+            this.predictionElements.playerPerformance.innerHTML = '';
+        }
+        if (this.predictionElements.trends) {
+            this.predictionElements.trends.innerHTML = '';
         }
     }
 
-    async getPlayerPredictions(league, team) {
-        try {
-            const response = await fetch(`/api/predictions/${league}/players${team ? `?team=${team}` : ''}`, {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-            });
-
-            if (!response.ok) throw new Error('Failed to fetch player predictions');
-            const data = await response.json();
-            
-            return this.processPlayerPredictions(data);
-        } catch (error) {
-            console.error('Player predictions error:', error);
-            throw error;
-        }
-    }
-
-    async getTeamTrendPrediction(league, team) {
-        try {
-            const response = await fetch(`/api/predictions/${league}/trends${team ? `?team=${team}` : ''}`, {
-                headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                }
-            });
-
-            if (!response.ok) throw new Error('Failed to fetch team trends');
-            const data = await response.json();
-            
-            return this.processTeamTrends(data);
-        } catch (error) {
-            console.error('Team trends error:', error);
-            throw error;
-        }
-    }
-
-    processGamePrediction(data) {
-        const { homeTeam, awayTeam, probabilities, factors } = data;
-        
-        return {
-            matchup: {
-                home: homeTeam,
-                away: awayTeam
-            },
-            prediction: {
-                homeWin: probabilities.home,
-                awayWin: probabilities.away,
-                draw: probabilities.draw,
-                confidence: this.calculateConfidence(probabilities),
-                recommendedBet: this.generateBetRecommendation(probabilities)
-            },
-            keyFactors: this.analyzeKeyFactors(factors)
-        };
-    }
-
-    processPlayerPredictions(data) {
-        return data.players.map(player => ({
-            name: player.name,
-            predictions: {
-                points: this.predictStatLine(player, 'points'),
-                assists: this.predictStatLine(player, 'assists'),
-                rebounds: this.predictStatLine(player, 'rebounds'),
-                efficiency: this.calculateEfficiencyRating(player)
-            },
-            form: this.analyzePlayerForm(player),
-            matchupAdvantage: this.calculateMatchupAdvantage(player)
-        }));
-    }
-
-    processTeamTrends(data) {
-        return {
-            overall: this.analyzeTrendData(data.overall),
-            recent: this.analyzeTrendData(data.recent),
-            situational: this.analyzeSituationalTrends(data.situational),
-            projection: this.generateTeamProjection(data)
-        };
-    }
-
-    calculateConfidence(probabilities) {
-        const maxProb = Math.max(...Object.values(probabilities));
-        
-        if (maxProb >= this.confidenceThresholds.high) return 'high';
-        if (maxProb >= this.confidenceThresholds.medium) return 'medium';
-        return 'low';
-    }
-
-    generateBetRecommendation(probabilities) {
-        const threshold = 0.6; // 60% probability threshold
-        const margin = 0.1; // 10% margin for value bets
-
-        return Object.entries(probabilities)
-            .filter(([outcome, prob]) => prob > threshold)
-            .map(([outcome, prob]) => ({
-                outcome,
-                confidence: prob,
-                value: this.calculateBetValue(prob, outcome)
-            }))
-            .filter(bet => bet.value > margin);
-    }
-
-    calculateBetValue(probability, outcome) {
-        // Compare predicted probability with implied odds
-        const impliedOdds = this.getImpliedOdds(outcome);
-        return probability - impliedOdds;
-    }
-
-    predictStatLine(player, stat) {
-        const history = player.recentGames || [];
-        const average = this.calculateWeightedAverage(history, stat);
-        const trend = this.calculateTrend(history, stat);
-        const matchupFactor = this.getMatchupFactor(player, stat);
-
-        return {
-            predicted: Math.round((average * matchupFactor + trend) * 10) / 10,
-            range: this.calculatePredictionRange(average, history, stat),
-            confidence: this.calculateStatPredictionConfidence(history, stat)
-        };
-    }
-
-    calculateWeightedAverage(games, stat) {
-        const weights = games.map((_, index) => 1 / (index + 1));
-        const weightSum = weights.reduce((a, b) => a + b, 0);
-
-        return games.reduce((sum, game, index) => {
-            return sum + (game[stat] * weights[index] / weightSum);
-        }, 0);
-    }
-
-    calculateTrend(games, stat) {
-        if (games.length < 5) return 0;
-        
-        const recentGames = games.slice(-5);
-        const values = recentGames.map(game => game[stat]);
-        
-        return this.calculateLinearRegression(values);
-    }
-
-    calculateLinearRegression(values) {
-        const n = values.length;
-        const x = Array.from({length: n}, (_, i) => i);
-        
-        const sumX = x.reduce((a, b) => a + b, 0);
-        const sumY = values.reduce((a, b) => a + b, 0);
-        const sumXY = x.reduce((sum, xi, i) => sum + xi * values[i], 0);
-        const sumXX = x.reduce((sum, xi) => sum + xi * xi, 0);
-
-        const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
-        return slope;
-    }
-
-    startAutoRefresh() {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-        }
-
-        this.updateInterval = setInterval(() => {
-            if (document.visibilityState === 'visible') {
-                this.refreshPredictions();
+    showLoading(isLoading) {
+        if (this.predictionElements.loading) {
+            if (isLoading) {
+                this.predictionElements.loading.classList.remove('hidden');
+            } else {
+                this.predictionElements.loading.classList.add('hidden');
             }
-        }, 60000); // Update every minute
+        }
     }
 
-    async refreshPredictions() {
+    savePredictionHistory(prediction) {
         try {
-            const predictions = await this.getPredictions(this.currentLeague);
-            this.updatePredictionDisplay(predictions);
+            // Get existing history
+            const historyJson = localStorage.getItem('predictionHistory');
+            const history = historyJson ? JSON.parse(historyJson) : [];
+            
+            // Add this prediction with metadata
+            history.unshift({
+                league: this.currentLeague,
+                teamId: this.selectedTeam,
+                predictionType: this.currentPredictionType,
+                timestamp: new Date().toISOString(),
+                prediction: prediction
+            });
+            
+            // Limit history to 10 entries
+            const limitedHistory = history.slice(0, 10);
+            
+            // Save back to localStorage
+            localStorage.setItem('predictionHistory', JSON.stringify(limitedHistory));
         } catch (error) {
-            console.error('Prediction refresh error:', error);
+            console.error('Failed to save prediction history:', error);
         }
     }
 
-    updatePredictionDisplay(predictions) {
-        // Update each prediction section in the UI
-        this.updateGamePredictionUI(predictions.game);
-        this.updatePlayerPredictionsUI(predictions.players);
-        this.updateTeamTrendsUI(predictions.trends);
+    async exportPredictionHistory() {
+        try {
+            const historyJson = localStorage.getItem('predictionHistory');
+            const history = historyJson ? JSON.parse(historyJson) : [];
+            
+            if (!history.length) {
+                Toast.show('No prediction history to export', 'warning');
+                return;
+            }
+            
+            const blob = new Blob([JSON.stringify(history, null, 2)], {type: 'application/json'});
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `prediction-history-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            Toast.show('Prediction history exported successfully', 'success');
+        } catch (error) {
+            console.error('Failed to export prediction history:', error);
+            Toast.show('Failed to export prediction history', 'error');
+        }
     }
 
-    destroy() {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
-        }
-        this.predictionModels.clear();
-        this.dataCache.clear();
+    // Add a method to add a new factor input
+    addFactorInput() {
+        const factorContainer = document.getElementById('factorInputs');
+        if (!factorContainer) return;
+        
+        const factorCount = factorContainer.querySelectorAll('.factor-input').length + 1;
+        
+        const factorHtml = `
+            <div class="factor-input bg-gray-800 p-4 rounded-lg mb-4">
+                <div class="flex justify-between mb-2">
+                    <h4 class="font-bold">Factor ${factorCount}</h4>
+                    <button type="button" class="text-red-500 hover:text-red-700 remove-factor">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                        </svg>
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Home Team Score</label>
+                        <input type="number" data-field="homeScore" class="bg-gray-700 w-full p-2 rounded" placeholder="Home Score">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Away Team Score</label>
+                        <input type="number" data-field="awayScore" class="bg-gray-700 w-full p-2 rounded" placeholder="Away Score">
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <label class="block text-sm font-medium text-gray-400 mb-1">Factor Weight</label>
+                    <input type="range" class="factor-weight w-full" min="0.1" max="2" step="0.1" value="1">
+                    <div class="flex justify-between text-xs text-gray-400">
+                        <span>0.1</span>
+                        <span>1.0</span>
+                        <span>2.0</span>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        factorContainer.insertAdjacentHTML('beforeend', factorHtml);
+        
+        // Add event listener to new remove button
+        const newFactor = factorContainer.lastElementChild;
+        newFactor.querySelector('.remove-factor').addEventListener('click', (e) => {
+            e.target.closest('.factor-input').remove();
+        });
     }
 }
 
-export default PredictionManager;
+export default new PredictionManager();

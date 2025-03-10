@@ -212,4 +212,13 @@ function getSystemMetrics() {
     };
 }
 
+// Error Handler
+router.use((err, req, res, next) => {
+    logger.error('Admin route error:', err);
+    res.status(500).json({
+        error: 'Admin processing error',
+        details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
+});
+
 module.exports = router;

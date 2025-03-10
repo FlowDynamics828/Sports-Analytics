@@ -287,7 +287,6 @@ async function setupTeamsCollection() {
   }
 }
 
-// Run the setup
 setupTeamsCollection()
   .then(() => console.log('Teams collection setup completed'))
   .catch(error => console.error('Teams collection setup failed:', error));
