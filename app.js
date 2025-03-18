@@ -7,8 +7,17 @@ const logger = require('winston');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
+const morgan = require('morgan');
+const mongoose = require('mongoose');
+const session = require('express-session');
+const RedisStore = require('connect-redis').default;
+const Redis = require('ioredis');
+const auth = require('./middleware/auth');
+const metricsManager = require('./utils/metricsManager');
 
 // Import routes
+const authRoutes = require('./routes/auth');
+const apiRoutes = require('./routes/api');
 const adminRoutes = require('./routes/admin');
 const analyticsRoutes = require('./routes/analytics');
 const leaguesRoutes = require('./routes/leagues');
@@ -22,23 +31,59 @@ const app = express();
 
 // Set up middleware
 app.use(helmet({
-  contentSecurityPolicy: false // Disable CSP for development
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdnjs.cloudflare.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
+      fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"],
+      sandbox: ["allow-forms", "allow-scripts", "allow-same-origin"]
+    }
+  }
 }));
 app.use(cors());
 app.use(compression());
+app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Redis client for session store
+const redisClient = new Redis({
+  host: process.env.REDIS_HOST || 'localhost',
+  port: process.env.REDIS_PORT || 6379,
+  password: process.env.REDIS_PASSWORD
+});
+
+// Session configuration
+app.use(session({
+  store: new RedisStore({ client: redisClient }),
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Set up routes
-app.use('/api/admin', adminRoutes);
-app.use('/api/analytics', analyticsRoutes);
-app.use('/api/leagues', leaguesRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/predictions', predictionsRoutes);
-app.use('/api/stats', statsRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', auth, adminRoutes);
+app.use('/api/analytics', auth, analyticsRoutes);
+app.use('/api/leagues', auth, leaguesRoutes);
+app.use('/api/payment', auth, paymentRoutes);
+app.use('/api/predictions', auth, predictionsRoutes);
+app.use('/api/stats', auth, statsRoutes);
+app.use('/api', apiRoutes);
 app.use('/api/health', healthRoutes);
 
 // Root route
@@ -63,10 +108,8 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({
     error: {
       message: err.message || 'Internal Server Error',
-      status: err.status || 500
     }
   });
 });
 
-// Export the app
 module.exports = app;

@@ -28,13 +28,17 @@ const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
 const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
 const { registerInstrumentations } = require('@opentelemetry/instrumentation');
 const { MongoDBInstrumentation } = require('@opentelemetry/instrumentation-mongodb');
-const { RedisInstrumentation } = require('@opentelemetry/instrumentation-ioredis');
+// // const { RedisInstrumentation } = require('@opentelemetry/instrumentation-ioredis');
 const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
 const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
 const { Resource } = require('@opentelemetry/resources');
 const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
 const crypto = require('crypto');
-const fetch = require('node-fetch');
+// Import node-fetch with proper compatibility
+const nodeFetch = require('node-fetch');
+const fetch = (...args) => {
+  return nodeFetch.default ? nodeFetch.default(...args) : nodeFetch(...args);
+};
 
 // Configure logging with .env settings and encryption
 const logger = winston.createLogger({
@@ -193,14 +197,14 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
     const exporter = new OTLPTraceExporter({ url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces' });
     provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
     provider.register();
-    registerInstrumentations({
-      instrumentations: [
-        new MongoDBInstrumentation(),
-        new RedisInstrumentation(),
-        new ExpressInstrumentation(),
-        new HttpInstrumentation()
-      ]
-    });
+   registerInstrumentations({
+  instrumentations: [
+    new MongoDBInstrumentation(),
+    // // new RedisInstrumentation(),
+    new ExpressInstrumentation(),
+    new HttpInstrumentation()
+  ]
+});
     this.tracer = provider.getTracer('predictive-model');
 
     // Initialize MetricsManager
@@ -439,45 +443,44 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
   }
 
   // Fetch data from TheSportsDB API (v1 or v2)
-  // In the fetchSportsDBData method, around line 349-375
-async fetchSportsDBData(endpoint, useV2 = true, params = {}) {
-  const span = this.tracer.startSpan('fetch_sportsdb_data');
-  try {
-    const apiKey = process.env.THESPORTSDB_API_KEY || '447279'; // Added default from screenshot
-    if (!apiKey) {
-      throw new Error('TheSportsDB API key not found in environment variables');
-    }
+  async fetchSportsDBData(endpoint, useV2 = true, params = {}) {
+    const span = this.tracer.startSpan('fetch_sportsdb_data');
+    try {
+      const apiKey = process.env.THESPORTSDB_API_KEY || '447279'; // Added default from screenshot
+      if (!apiKey) {
+        throw new Error('TheSportsDB API key not found in environment variables');
+      }
 
-    let url;
-    if (useV2) {
-      url = `https://www.thesportsdb.com/api/v2/json/${endpoint}`;
-      const response = await fetch(url, {
-        headers: { 'X-API-KEY': apiKey },
-        method: 'GET'
+      let url;
+      if (useV2) {
+        url = `https://www.thesportsdb.com/api/v2/json/${apiKey}/${endpoint}`;
+        const response = await fetch(url, {
+          headers: { 'X-API-KEY': apiKey },
+          method: 'GET'
+        });
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        return await response.json();
+      } else {
+        const queryString = new URLSearchParams(params).toString();
+        url = `https://www.thesportsdb.com/api/v1/json/${apiKey}/${endpoint}${queryString ? '?' + queryString : ''}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        return await response.json();
+      }
+    } catch (error) {
+      logger.error(`Error fetching data from TheSportsDB (${endpoint}):`, {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
-      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-      return await response.json();
-    } else {
-      const queryString = new URLSearchParams(params).toString();
-      url = `https://www.thesportsdb.com/api/v1/json/${apiKey}/${endpoint}${queryString ? '?' + queryString : ''}`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
-      return await response.json();
+      if (this.metrics && this.metrics.predictionErrors) {
+        this.metrics.predictionErrors.inc({ type: 'api_fetch' });
+      }
+      throw error;
+    } finally {
+      span.end();
     }
-  } catch (error) {
-    logger.error(`Error fetching data from TheSportsDB (${endpoint}):`, {
-      error: error.message,
-      stack: error.stack,
-      metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-    });
-    if (this.metrics && this.metrics.predictionErrors) {
-      this.metrics.predictionErrors.inc({ type: 'api_fetch' });
-    }
-    throw error;
-  } finally {
-    span.end();
   }
-}
 
   // Fetch historical events for a league
   async fetchHistoricalEvents(league, season = '2023-2024') {
@@ -554,6 +557,9 @@ async fetchSportsDBData(endpoint, useV2 = true, params = {}) {
         stack: error.stack,
         metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
+      if (this.metrics && this.metrics.predictionErrors) {
+        this.metrics.predictionErrors.inc({ type: 'api_fetch' });
+      }
       throw error;
     } finally {
       span.end();

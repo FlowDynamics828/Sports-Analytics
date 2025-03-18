@@ -1,0 +1,130 @@
+// utils/dbManager.js
+const { getDatabaseManager } = require('./db');
+const winston = require('winston');
+
+// Configure logger
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    }),
+    new winston.transports.File({ 
+      filename: 'logs/dbmanager-error.log',
+      level: 'error'
+    }),
+    new winston.transports.File({ 
+      filename: 'logs/dbmanager.log'
+    })
+  ]
+});
+
+/**
+ * Database Manager wrapper class with additional functionality
+ */
+class DbManager {
+  constructor() {
+    this.db = null;
+    this.connected = false;
+    this.databaseManager = getDatabaseManager();
+  }
+
+  /**
+   * Initialize database connection
+   * @returns {Promise<boolean>} Connection success
+   */
+  async initialize() {
+    try {
+      if (!this.connected) {
+        const result = await this.databaseManager.initialize();
+        this.connected = result;
+        if (result) {
+          this.db = this.databaseManager.getDb();
+          logger.info('DbManager initialized successfully');
+        }
+      }
+      return this.connected;
+    } catch (error) {
+      logger.error(`DbManager initialization error: ${error.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Get database instance
+   * @returns {Object|null} MongoDB database instance
+   */
+  getDb() {
+    if (!this.connected) {
+      logger.warn('Attempted to get database before connection was established');
+      return null;
+    }
+    return this.db;
+  }
+
+  /**
+   * Get a collection from the database
+   * @param {string} collectionName - Name of the collection
+   * @returns {Object|null} MongoDB collection
+   */
+  getCollection(collectionName) {
+    if (!this.connected || !this.db) {
+      logger.warn(`Attempted to get collection ${collectionName} before connection was established`);
+      return null;
+    }
+    return this.db.collection(collectionName);
+  }
+
+  /**
+   * Perform database health check
+   * @returns {Promise<Object>} Health status
+   */
+  async healthCheck() {
+    return await this.databaseManager.healthCheck();
+  }
+
+  /**
+   * Close database connection
+   * @returns {Promise<boolean>} Close success
+   */
+  async close() {
+    try {
+      if (this.connected) {
+        const result = await this.databaseManager.close();
+        this.connected = !result;
+        this.db = null;
+        return result;
+      }
+      return true;
+    } catch (error) {
+      logger.error(`Error closing database connection: ${error.message}`);
+      return false;
+    }
+  }
+}
+
+// Create singleton instance
+let instance = null;
+
+/**
+ * Get DbManager instance
+ * @returns {DbManager} Database manager instance
+ */
+function getDbManager() {
+  if (!instance) {
+    instance = new DbManager();
+  }
+  return instance;
+}
+
+module.exports = {
+  DbManager,
+  getDbManager
+};

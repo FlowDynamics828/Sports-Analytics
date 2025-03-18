@@ -282,7 +282,7 @@ These changes should resolve the issues you've been experiencing with the Sports
 ## Issues Fixed
 
 ### 1. Python Script Path Issue
-- **Problem**: The Python script 'predictive_model.py' could not be found at the path 'C:\Users\d07ch\OneDrive\Desktop\Sports Analytics\sports-analytics\predictive_model.py'.
+- **Problem**: The Python script 'predictive_model.py' could not be found at the path 'C:\Users\d07ch\OneDrive\Desktop\Sports Analytics\sports-analytics\scripts\predictive_model.py'.
 - **Solution**: 
   - Modified `pythonBridge.js` to properly check if the script exists before attempting to run it
   - Added explicit error handling with detailed error messages

@@ -1,11 +1,10 @@
-// utils/cache.js
+// utils/cacheManager.js - Enterprise-grade Memory/Redis cache fallback implementation
 const NodeCache = require('node-cache');
-const _ = require('lodash');
-const Redis = require('ioredis'); // Added for Redis fallback/hybrid caching
-require('dotenv').config(); // Added to access .env variables
 const winston = require('winston');
+const os = require('os');
+const { v4: uuidv4 } = require('uuid');
 
-// Configure winston logger to match api.js
+// Configure logging
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
@@ -20,835 +19,399 @@ const logger = winston.createLogger({
         winston.format.simple()
       )
     }),
-    new winston.transports.File({ filename: 'error.log', level: 'error' })
+    new winston.transports.File({ 
+      filename: 'logs/cache-error.log', 
+      level: 'error' 
+    })
   ]
 });
 
+/**
+ * Enterprise-grade cache manager with Redis integration and memory optimization
+ * @class CacheManager
+ */
 class CacheManager {
   constructor(options = {}) {
-    // Use .env settings with defaults - with more conservative values
-    const cacheTTL = parseInt(process.env.CACHE_TTL, 10) || 900; // 15 minutes default (reduced from 30)
-    const cacheCheckPeriod = parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 120; // 2 minutes default (reduced from 5)
-    const cacheMaxItems = parseInt(process.env.CACHE_MAX_ITEMS, 10) || 200; // 200 items default (reduced from 500)
-
-    this.cache = new NodeCache({
-      stdTTL: cacheTTL,
-      checkperiod: cacheCheckPeriod,
-      useClones: false, // Keep this for memory efficiency
-      maxKeys: cacheMaxItems,
-      deleteOnExpire: true, // Ensure items are deleted when they expire
-      ...options
-    });
-
-    // We'll initialize Redis later in the initialize method
-    this.redis = null;
-
-    // Cache statistics with Redis fallback tracking
-    this.stats = {
-      hits: 0,
-      misses: 0,
-      keys: 0,
-      redisHits: 0,
-      redisMisses: 0,
-      lastCleanup: Date.now()
-    };
-
-    // Create middleware function as a class method
-    this.middleware = this.createMiddleware.bind(this);
-
-    // Initialize asynchronously in constructor
     this.initialized = false;
+    this.instanceId = uuidv4().substring(0, 8);
+    this.startTime = Date.now();
 
-    // Track large values to identify potential memory issues
-    this.largeValueThreshold = 50 * 1024; // 50KB
-    this.largeValues = new Map();
+    this.useRedis = process.env.USE_REDIS === 'true';
+    this.redisConnectionAttempts = 0;
+    this.maxRedisRetries = parseInt(process.env.REDIS_MAX_RETRIES, 10) || 3;
 
-    // Add memory usage check with automatic cleanup
-    this.checkMemoryUsage = () => {
-      const memoryUsage = process.memoryUsage();
-      const memoryThreshold = parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.70; // Lower threshold (from 0.80)
-      const currentUsage = memoryUsage.heapUsed / memoryUsage.heapTotal;
+    this.options = {
+      stdTTL: parseInt(process.env.CACHE_TTL, 10) || 600,
+      checkperiod: parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 120,
+      maxKeys: parseInt(process.env.CACHE_MAX_ITEMS, 10) || 1000,
+      deleteOnExpire: true,
+      useClones: false,
+      ...options
+    };
 
-      // Log memory usage at debug level to avoid excessive logging
+    this.memoryCache = new NodeCache(this.options);
+
+    this.stats = {
+      hits: { memory: 0, redis: 0 },
+      misses: { memory: 0, redis: 0 },
+      operations: {
+        get: { count: 0, errors: 0, latency: [] },
+        set: { count: 0, errors: 0, latency: [] },
+        delete: { count: 0, errors: 0 }
+      },
+      memoryCheckCount: 0,
+      cleanupCount: 0,
+      redisReconnections: 0,
+      lastChecked: Date.now()
+    };
+
+    this.memoryThreshold = parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.75;
+    this.lastMemoryCheckTime = Date.now();
+    this.lastCleanupTime = Date.now();
+    this.memoryCheckInterval = 60000;
+    this.cleanupInterval = 300000;
+
+    this.setupMemoryMonitoring();
+
+    logger.info(`CacheManager initialized (${this.instanceId}) with ${this.useRedis ? 'Redis + memory fallback' : 'memory-only'} mode`, {
+      options: this.options,
+      useRedis: this.useRedis,
+      instanceId: this.instanceId,
+      memoryThreshold: this.memoryThreshold
+    });
+  }
+
+  setupMemoryMonitoring() {
+    setTimeout(() => this.checkMemoryUsage(), 10000);
+    setInterval(() => {
+      const now = Date.now();
+      this.updateMonitoringIntervals();
+      if (now - this.lastMemoryCheckTime >= this.memoryCheckInterval) {
+        this.checkMemoryUsage();
+        this.lastMemoryCheckTime = now;
+      }
+      if (now - this.lastCleanupTime >= this.cleanupInterval) {
+        this.runCleanup();
+        this.lastCleanupTime = now;
+      }
+    }, 15000);
+  }
+
+  updateMonitoringIntervals() {
+    try {
+      const memUsage = process.memoryUsage();
+      const currentUsage = memUsage.heapUsed / memUsage.heapTotal;
+      const cpus = os.cpus();
+      const cpuUsage = cpus.reduce((acc, cpu) => {
+        const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
+        return acc + (1 - cpu.times.idle / total);
+      }, 0) / cpus.length;
+
+      if (currentUsage > this.memoryThreshold || cpuUsage > 0.7) {
+        this.memoryCheckInterval = 30000;
+        this.cleanupInterval = 120000;
+      } else if (currentUsage > this.memoryThreshold * 0.8 || cpuUsage > 0.5) {
+        this.memoryCheckInterval = 60000;
+        this.cleanupInterval = 240000;
+      } else {
+        this.memoryCheckInterval = 120000;
+        this.cleanupInterval = 600000;
+      }
+    } catch (error) {
+      logger.error('Error updating monitoring intervals:', error);
+      this.memoryCheckInterval = 60000;
+      this.cleanupInterval = 300000;
+    }
+  }
+
+  checkMemoryUsage() {
+    try {
+      const memUsage = process.memoryUsage();
+      const currentUsage = memUsage.heapUsed / memUsage.heapTotal;
+      this.stats.memoryCheckCount++;
+
       if (process.env.LOG_LEVEL === 'debug') {
-        logger.debug(`CacheManager memory usage: ${Math.round(currentUsage * 100)}% of heap used`, {
-          heapUsed: Math.round(memoryUsage.heapUsed / (1024 * 1024)) + 'MB',
-          heapTotal: Math.round(memoryUsage.heapTotal / (1024 * 1024)) + 'MB',
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+        logger.debug(`Memory usage: ${(currentUsage * 100).toFixed(1)}% (${Math.round(memUsage.heapUsed / 1024 / 1024)}MB/${Math.round(memUsage.heapTotal / 1024 / 1024)}MB)`, {
+          instanceId: this.instanceId
         });
       }
 
-      // Perform periodic cleanup regardless of memory pressure (every 10 minutes)
-      const now = Date.now();
-      if (now - this.stats.lastCleanup > 600000) { // 10 minutes
-        this.performPeriodicCleanup();
-        this.stats.lastCleanup = now;
-      }
-
-      // More aggressive cleanup when memory usage is high
-      if (currentUsage > memoryThreshold) {
-        logger.warn(`High memory usage detected in CacheManager: ${Math.round(currentUsage * 100)}% of heap used`, {
-          heapUsed: Math.round(memoryUsage.heapUsed / (1024 * 1024)) + 'MB',
-          heapTotal: Math.round(memoryUsage.heapTotal / (1024 * 1024)) + 'MB',
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+      if (currentUsage > this.memoryThreshold) {
+        logger.warn(`High memory usage detected: ${(currentUsage * 100).toFixed(1)}%`, {
+          heapUsed: `${Math.round(memUsage.heapUsed / 1024 / 1024)}MB`,
+          heapTotal: `${Math.round(memUsage.heapTotal / 1024 / 1024)}MB`,
+          instanceId: this.instanceId
         });
-
-        // Perform automatic cleanup when memory usage is high
-        this.performMemoryOptimization(currentUsage, memoryThreshold);
-
-        // Try to trigger garbage collection if available
-        if (global.gc) {
+        this.runCleanup(currentUsage);
+        if (global.gc && currentUsage > 0.85) {
           global.gc();
-          logger.info('Garbage collection triggered in CacheManager', {
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-        }
-      }
-    };
-
-    // Set up memory check interval - check more frequently when under memory pressure
-    this.memoryCheckInterval = setInterval(this.checkMemoryUsage,
-      currentUsage => currentUsage > 0.75 ? 60000 : 180000); // Check every 1 or 3 minutes based on memory pressure
-
-    // Initial memory check after a short delay
-    setTimeout(() => this.checkMemoryUsage(), 5000);
-
-    this.lastOptimizationTime = 0; // Track last optimization time
-  }
-
-  /**
-   * Perform periodic cleanup of cache regardless of memory pressure
-   * @private
-   */
-  performPeriodicCleanup() {
-    try {
-      const keys = this.cache.keys();
-      if (keys.length === 0) return;
-
-      logger.info(`Performing periodic cache cleanup, current keys: ${keys.length}`, {
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-
-      // Check for large values that might be causing memory issues
-      this.identifyLargeValues();
-
-      // If we have too many keys, remove the oldest 10%
-      if (keys.length > 100) {
-        const keysToRemove = Math.ceil(keys.length * 0.1);
-        logger.info(`Removing ${keysToRemove} oldest keys during periodic cleanup`, {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-
-        // Get key stats to find oldest keys
-        const keyStats = keys.map(key => {
-          const stats = this.cache.getTtl(key);
-          return { key, ttl: stats };
-        });
-
-        // Sort by TTL (ascending) and remove oldest keys
-        keyStats.sort((a, b) => a.ttl - b.ttl);
-        const oldestKeys = keyStats.slice(0, keysToRemove).map(item => item.key);
-
-        // Delete the oldest keys
-        oldestKeys.forEach(key => this.cache.del(key));
-      }
-    } catch (error) {
-      logger.error(`Error during periodic cache cleanup: ${error.message}`, {
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-    }
-  }
-
-  /**
-   * Identify large values in cache that might be causing memory issues
-   * @private
-   */
-  identifyLargeValues() {
-    try {
-      const keys = this.cache.keys();
-      this.largeValues.clear();
-
-      for (const key of keys) {
-        const value = this.cache.get(key);
-        if (!value) continue;
-
-        // Estimate size of value
-        let size = 0;
-        try {
-          const jsonString = JSON.stringify(value);
-          size = jsonString.length;
-        } catch (e) {
-          // If we can't stringify, use a rough estimate
-          size = 1000;
-        }
-
-        if (size > this.largeValueThreshold) {
-          this.largeValues.set(key, size);
-        }
-      }
-
-      // Log large values if there are any
-      if (this.largeValues.size > 0) {
-        const largeValuesList = Array.from(this.largeValues.entries())
-          .map(([key, size]) => `${key}: ${Math.round(size / 1024)}KB`)
-          .join(', ');
-
-        logger.warn(`Found ${this.largeValues.size} large values in cache: ${largeValuesList}`, {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-
-        // If we have too many large values, remove some of them
-        if (this.largeValues.size > 5) {
-          const largeValuesArray = Array.from(this.largeValues.entries());
-          largeValuesArray.sort((a, b) => b[1] - a[1]); // Sort by size descending
-
-          // Remove the largest values
-          const keysToRemove = largeValuesArray.slice(0, Math.ceil(largeValuesArray.length / 2))
-            .map(([key]) => key);
-
-          logger.info(`Removing ${keysToRemove.length} large values from cache`, {
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-
-          keysToRemove.forEach(key => this.cache.del(key));
+          logger.info('Forced garbage collection due to high memory pressure', { instanceId: this.instanceId });
         }
       }
     } catch (error) {
-      logger.error(`Error identifying large cache values: ${error.message}`, {
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
+      logger.error('Memory check error:', error);
     }
   }
 
-  /**
-   * Initialize cache system with async Redis connection handling
-   * @param {Redis} redisClient - Redis client to use
-   * @returns {Promise<void>} Resolves when initialization is complete
-   */
-  async initialize(redisClient) {
-    if (this.initialized) return; // Prevent multiple initializations
-
+  runCleanup(currentUsage) {
     try {
-      // Ensure Redis client exists
-      if (!redisClient) {
-        logger.warn('Redis client not provided to CacheManager, using in-memory cache only', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
+      const keys = this.memoryCache.keys();
+      if (!keys.length) return;
+
+      this.stats.cleanupCount++;
+      const keysCount = keys.length;
+      let cleanupPercentage = currentUsage 
+        ? (currentUsage > 0.9 ? 0.5 : currentUsage > 0.85 ? 0.3 : currentUsage > 0.8 ? 0.2 : 0.1)
+        : 0.1;
+
+      const removeCount = Math.ceil(keysCount * cleanupPercentage);
+      if (!removeCount) return;
+
+      logger.info(`Running cache cleanup: removing ${removeCount} of ${keysCount} keys (${Math.round(cleanupPercentage * 100)}%)`, {
+        instanceId: this.instanceId
+      });
+
+      const keyDetails = keys.map(key => ({
+        key,
+        ttl: this.memoryCache.getTtl(key) || Date.now()
+      })).sort((a, b) => a.ttl - b.ttl);
+
+      const keysToRemove = keyDetails.slice(0, removeCount).map(item => item.key);
+      this.memoryCache.del(keysToRemove);
+
+      logger.info(`Cache cleanup complete: removed ${keysToRemove.length} keys, ${keys.length - keysToRemove.length} remain`, {
+        instanceId: this.instanceId
+      });
+
+      this.lastCleanupTime = Date.now();
+    } catch (error) {
+      logger.error('Cleanup error:', error);
+    }
+  }
+
+  async initialize(redisClient = null) {
+    try {
+      if (this.useRedis && redisClient) {
+        this.redis = redisClient;
+        await this.redis.ping();
+        logger.info('Redis connection successful for cache', { instanceId: this.instanceId });
+
+        this.redis.on('reconnecting', () => {
+          this.stats.redisReconnections++;
+          logger.warn('Redis reconnecting...', { reconnectCount: this.stats.redisReconnections, instanceId: this.instanceId });
         });
-        this.initialized = true;
-        return;
-      }
 
-      this.redis = redisClient; // Use the provided Redis client
-
-      // Wait for Redis to be ready (if not already connected)
-      if (this.redis.status !== 'ready') {
-        await new Promise((resolve) => {
-          const readyHandler = () => {
-            logger.info('Redis connection established for cache', {
-              metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-            });
-            this.redis.removeListener('error', errorHandler);
-            clearTimeout(timeoutId);
-            resolve();
-          };
-
-          const errorHandler = (error) => {
-            logger.warn('Redis connection failed, using in-memory cache only:', {
-              error: error.message,
-              metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-            });
-            this.redis.removeListener('ready', readyHandler);
-            clearTimeout(timeoutId);
-            this.redis = null; // Disable Redis if connection fails
-            resolve(); // Resolve even if Redis fails to prevent stalling
-          };
-
-          // Add event listeners with proper cleanup
-          this.redis.once('ready', readyHandler);
-          this.redis.once('error', errorHandler);
-
-          // Add a timeout to prevent hanging if Redis never connects
-          const timeoutId = setTimeout(() => {
-            logger.warn('Redis connection timeout, using in-memory cache only', {
-              metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-            });
-            this.redis.removeListener('ready', readyHandler);
-            this.redis.removeListener('error', errorHandler);
-            this.redis = null;
-            resolve();
-          }, 10000); // 10 second timeout (increased for reliability)
+        this.redis.on('error', (error) => {
+          logger.error(`Redis error: ${error.message}`, { instanceId: this.instanceId });
         });
+      } else {
+        this.useRedis = false;
+        logger.info('Using in-memory cache only (Redis disabled)', { instanceId: this.instanceId });
       }
-
-      // Verify Redis connection with ping
-      if (this.redis) {
-        try {
-          await this.redis.ping();
-          logger.info('Redis connection verified with PING', {
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-        } catch (pingError) {
-          logger.warn('Redis PING failed, using in-memory cache only:', {
-            error: pingError.message,
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-          this.redis = null;
-        }
-      }
-
-      // Set up cache event listeners
-      this.cache.on('set', () => {
-        this.stats.keys = this.cache.keys().length;
-        this.checkMemoryUsage(); // Check memory after set
-      });
-
-      this.cache.on('del', () => {
-        this.stats.keys = this.cache.keys().length;
-      });
-
-      this.cache.on('expired', () => {
-        this.stats.keys = this.cache.keys().length;
-      });
-
       this.initialized = true;
+      return true;
     } catch (error) {
-      logger.error('Cache initialization failed:', {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-      this.redis = null; // Ensure Redis is disabled on error
-      // Don't throw the error, just log it and continue with in-memory cache
+      logger.warn(`Redis connection failed: ${error.message}. Falling back to in-memory cache`, { instanceId: this.instanceId });
+      this.useRedis = false;
       this.initialized = true;
-    }
-  }
-
-  /**
-   * Create caching middleware
-   * @param {number} duration Cache duration in seconds
-   * @returns {Function} Express middleware
-   */
-  createMiddleware(duration) {
-    return (req, res, next) => {
-      const key = req.originalUrl;
-      const cachedResponse = this.get(key); // Use get method for hybrid caching
-
-      if (cachedResponse) {
-        this.stats.hits++;
-        res.json(cachedResponse);
-        return;
-      }
-
-      this.stats.misses++;
-      res.originalJson = res.json;
-      res.json = body => {
-        this.set(key, body, duration).catch(error => {
-          logger.error('Failed to cache response:', { 
-            error: error.message, 
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() } 
-          });
-        });
-        res.originalJson(body);
-      };
-      next();
-    };
-  }
-
-  /**
-   * Get value from cache (hybrid: in-memory first, Redis fallback)
-   * @param {string} key Cache key
-   * @returns {*} Cached value or undefined
-   */
-  async get(key) {
-    try {
-      if (!this.initialized) {
-        logger.warn('Cache not initialized, initializing now', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-        await this.initialize(null); // Initialize with no Redis if not already done
-      }
-
-      this.checkMemoryUsage(); // Check memory before processing
-      const inMemoryValue = this.cache.get(key);
-      if (inMemoryValue !== undefined) {
-        this.stats.hits++;
-        return inMemoryValue;
-      }
-
-      if (this.redis) {
-        try {
-          const redisValue = await this.redis.get(key);
-          if (redisValue) {
-            this.stats.redisHits++;
-            const parsedValue = JSON.parse(redisValue);
-            this.cache.set(key, parsedValue, this.cache.options.stdTTL); // Sync to in-memory
-            return parsedValue;
-          }
-          this.stats.redisMisses++;
-        } catch (redisError) {
-          logger.warn(`Redis get error for key ${key}, falling back to in-memory:`, {
-            error: redisError.message,
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-        }
-      }
-
-      this.stats.misses++;
-      return null;
-    } catch (error) {
-      logger.error(`Cache get error for key ${key}:`, {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-      this.stats.misses++;
-      return null;
-    }
-  }
-
-  /**
-   * Set value in cache (hybrid: in-memory primary, Redis secondary)
-   * @param {string} key Cache key
-   * @param {*} value Value to cache
-   * @param {number} ttl Time to live in seconds
-   */
-  async set(key, value, ttl = this.cache.options.stdTTL) {
-    try {
-      if (!this.initialized) {
-        logger.warn('Cache not initialized, initializing now', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-        await this.initialize(null); // Initialize with no Redis if not already done
-      }
-
-      this.checkMemoryUsage(); // Check memory before processing
-      this.cache.set(key, value, ttl);
-
-      if (this.redis) {
-        try {
-          await this.redis.setex(key, ttl, JSON.stringify(value));
-        } catch (redisError) {
-          logger.warn(`Redis set error for key ${key}, continuing with in-memory only:`, {
-            error: redisError.message,
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-          // Continue execution - don't throw error if Redis fails but in-memory succeeds
-        }
-      }
-    } catch (error) {
-      logger.error(`Cache set error for key ${key}:`, {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Delete value from cache
-   * @param {string} key Cache key
-   */
-  async delete(key) {
-    try {
-      this.checkMemoryUsage(); // Check memory before processing
-      this.cache.del(key);
-      if (this.redis) {
-        await this.redis.del(key);
-      }
-    } catch (error) {
-      logger.error(`Cache delete error for key ${key}:`, { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() } 
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Clear entire cache
-   */
-  async clear() {
-    try {
-      this.checkMemoryUsage(); // Check memory before processing
-      this.cache.flushAll();
-      if (this.redis) {
-        try {
-          await this.redis.flushdb();
-        } catch (redisError) {
-          logger.error('Redis flushdb error:', {
-            error: redisError.message,
-            stack: redisError.stack,
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-          // Attempt to reconnect Redis if the connection is lost
-          if (this.redis.status !== 'ready') {
-            logger.warn('Attempting to reconnect Redis...');
-            await this.initialize(this.redis);
-          }
-        }
-      }
-    } catch (error) {
-      logger.error('Cache clear error:', {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-      throw error;
-    }
-  }
-
-  /**
-   * Get cache statistics
-   * @returns {Object} Cache statistics
-   */
-  getStats() {
-    return {
-      ...this.stats,
-      memoryUsage: this.cache.getStats(),
-      keys: this.cache.keys().length,
-      hitRate: this.calculateHitRate(),
-      redisStatus: this.redis ? 'connected' : 'disconnected',
-      metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-    };
-  }
-
-  /**
-   * Calculate cache hit rate
-   * @returns {number} Hit rate percentage
-   */
-  calculateHitRate() {
-    const total = this.stats.hits + this.stats.misses;
-    if (total === 0) return 0;
-    return (this.stats.hits / total) * 100;
-  }
-
-  /**
-   * Perform memory optimization when memory usage is high
-   * @param {number} currentUsage - Current memory usage ratio
-   * @param {number} threshold - Memory usage threshold
-   */
-  async performMemoryOptimization(currentUsage, threshold) {
-    try {
-      const now = Date.now();
-      const cooldownPeriod = 300000; // 5 minutes cooldown period
-
-      if (now - this.lastOptimizationTime < cooldownPeriod) {
-        logger.info('Skipping cache optimization - cooldown period active', {
-          timeSinceLastOptimization: `${Math.round((now - this.lastOptimizationTime) / 1000)}s`,
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-        return;
-      }
-
-      this.lastOptimizationTime = now;
-
-      // Limit optimization frequency to prevent thrashing
-      if (this._lastOptimization && (now - this._lastOptimization) < 60000) { // Only optimize once per minute max
-        logger.info('Skipping cache optimization - already optimized recently', {
-          timeSinceLastOptimization: `${Math.round((now - this._lastOptimization) / 1000)}s`,
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-        return;
-      }
-      this._lastOptimization = now;
-
-      logger.info('Starting cache memory optimization', {
-        currentUsage: Math.round(currentUsage * 100) + '%',
-        threshold: Math.round(threshold * 100) + '%',
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-
-      // Get all cache keys
-      const allKeys = this.cache.keys();
-      if (allKeys.length === 0) {
-        logger.info('No cache keys to optimize', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-        return;
-      }
-
-      // More aggressive cleanup when memory usage is very high
-      let removalPercentage = 0.2; // Start with 20% removal
-
-      if (currentUsage > 0.90) {
-        // Very high memory usage - remove 50% of cache
-        removalPercentage = 0.5;
-        logger.warn('Critical memory pressure - removing 50% of cache', {
-          currentUsage: Math.round(currentUsage * 100) + '%',
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-      } else if (currentUsage > 0.85) {
-        // High memory usage - remove 30% of cache
-        removalPercentage = 0.3;
-        logger.warn('High memory pressure - removing 30% of cache', {
-          currentUsage: Math.round(currentUsage * 100) + '%',
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-      }
-
-      // Calculate items to remove based on percentage
-      const itemsToRemove = Math.ceil(allKeys.length * removalPercentage);
-
-      if (itemsToRemove <= 0) {
-        logger.info('No cache items need to be removed during optimization', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-        return;
-      }
-
-      logger.info(`Removing ${itemsToRemove} cache items (${Math.round(removalPercentage * 100)}% of cache)`, {
-        totalItems: allKeys.length,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-
-      // Optimization: Batch process keys in chunks to reduce overhead
-      const BATCH_SIZE = 100;
-      const keysToRemove = [];
-
-      // Process in batches to avoid blocking the event loop
-      for (let i = 0; i < allKeys.length && keysToRemove.length < itemsToRemove; i += BATCH_SIZE) {
-        const batch = allKeys.slice(i, i + BATCH_SIZE);
-
-        // Get TTL for each key in batch
-        const batchStats = batch.map(key => {
-          const ttl = this.cache.getTtl(key);
-          return { key, ttl: ttl || 0 };
-        });
-
-        // Sort by TTL (remove items closest to expiration first)
-        batchStats.sort((a, b) => a.ttl - b.ttl);
-
-        // Add keys to remove list
-        const batchToRemove = batchStats.slice(0, itemsToRemove - keysToRemove.length);
-        keysToRemove.push(...batchToRemove.map(item => item.key));
-      }
-
-      // Remove keys in batches to avoid blocking
-      let removedCount = 0;
-      for (let i = 0; i < keysToRemove.length; i += BATCH_SIZE) {
-        const batch = keysToRemove.slice(i, i + BATCH_SIZE);
-        await Promise.all(batch.map(key => this.delete(key).catch(() => {})));
-        removedCount += batch.length;
-
-        // Yield to event loop occasionally
-        if (i % (BATCH_SIZE * 5) === 0) {
-          await new Promise(resolve => setTimeout(resolve, 0));
-        }
-      }
-
-      // Force garbage collection if available
-      if (global.gc) {
-        global.gc();
-      }
-
-      // Check memory usage after optimization
-      const memoryAfter = process.memoryUsage();
-      const usageAfter = memoryAfter.heapUsed / memoryAfter.heapTotal;
-
-      logger.info(`Memory optimization complete, removed ${removedCount} cache items`, {
-        beforeUsage: Math.round(currentUsage * 100) + '%',
-        afterUsage: Math.round(usageAfter * 100) + '%',
-        improvement: Math.round((currentUsage - usageAfter) * 100) + '%',
-        remainingItems: this.cache.keys().length,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-
-    } catch (error) {
-      logger.error('Error during cache memory optimization:', {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-    }
-  }
-
-  /**
-   * Health check method
-   * @returns {Object} Health status
-   */
-  async healthCheck() {
-    try {
-      this.checkMemoryUsage(); // Check memory before processing
-      const testKey = '_health_check_';
-      await this.set(testKey, 'test', 1);
-      const value = await this.get(testKey);
-      
-      return {
-        status: value === 'test' ? 'healthy' : 'degraded',
-        stats: this.getStats()
-      };
-    } catch (error) {
-      return {
-        status: 'unhealthy',
-        error: error.message,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      };
-    }
-  }
-
-  /**
-   * Get keys matching pattern
-   * @param {string} pattern Pattern to match (supports * wildcard)
-   * @returns {Array} Matching keys
-   */
-  async keys(pattern) {
-    try {
-      this.checkMemoryUsage(); // Check memory before processing
-      const allKeys = this.cache.keys();
-      if (!pattern || pattern === '*') return allKeys;
-      
-      const regexPattern = pattern
-          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-          .replace(/\*/g, '.*');
-      
-      const regex = new RegExp(`^${regexPattern}$`);
-      return allKeys.filter(key => regex.test(key));
-    } catch (error) {
-      logger.error(`Cache keys error for pattern ${pattern}:`, { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() } 
-      });
-      return [];
-    }
-  }
-
-  /**
-   * Check if key exists in cache
-   * @param {string} key Cache key
-   * @returns {boolean} True if key exists
-   */
-  async has(key) {
-    try {
-      this.checkMemoryUsage(); // Check memory before processing
-      return this.cache.has(key) || (this.redis && await this.redis.exists(key));
-    } catch (error) {
-      logger.error(`Cache has error for key ${key}:`, { 
-        error: error.message, 
-        stack: error.stack, 
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() } 
-      });
       return false;
     }
   }
 
-  /**
-   * Shutdown cache system with timeout protection
-   */
-  async shutdown() {
+  async set(key, value, ttl = this.options.stdTTL) {
+    const startTime = Date.now();
     try {
-      logger.info('Starting CacheManager shutdown', {
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
+      if (!this.initialized) await this.initialize();
+      this.memoryCache.set(key, value, ttl);
+      if (this.useRedis && this.redis) await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
 
-      // Skip memory check during shutdown to avoid recursive cleanup
+      this.stats.operations.set.count++;
+      this.stats.operations.set.latency.push(Date.now() - startTime);
+      if (this.stats.operations.set.latency.length > 100) this.stats.operations.set.latency.shift();
+      return true;
+    } catch (error) {
+      this.stats.operations.set.errors++;
+      logger.error(`Cache set error for key ${key}: ${error.message}`, { instanceId: this.instanceId });
+      return false;
+    }
+  }
 
-      // Clear the memory check interval
-      if (this.memoryCheckInterval) {
-        clearInterval(this.memoryCheckInterval);
-        this.memoryCheckInterval = null;
-        logger.info('Memory check interval cleared', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
+  async get(key) {
+    const startTime = Date.now();
+    try {
+      if (!this.initialized) await this.initialize();
+      const memoryValue = this.memoryCache.get(key);
+      if (memoryValue !== undefined) {
+        this.stats.hits.memory++;
+        this.updateLatency('get', startTime);
+        return memoryValue;
       }
 
-      // Close Redis connection if it exists with timeout protection
-      if (this.redis) {
-        logger.info('Closing Redis connection', {
-          status: this.redis.status || 'unknown',
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-
-        try {
-          // Use Promise.race to add timeout to Redis quit
-          await Promise.race([
-            this.redis.quit().catch(e => {
-              logger.warn(`Redis quit error: ${e.message}, forcing disconnect`, {
-                metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-              });
-              // If quit fails, force disconnect
-              this.redis.disconnect();
-            }),
-            // 2 second timeout for quit operation
-            new Promise(resolve => setTimeout(() => {
-              logger.warn('Redis quit operation timed out after 2 seconds, forcing disconnect', {
-                metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-              });
-              if (this.redis) {
-                this.redis.disconnect();
-              }
-              resolve();
-            }, 2000))
-          ]);
-        } catch (redisError) {
-          logger.warn(`Redis shutdown error: ${redisError.message}, forcing disconnect`, {
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
-          // Force disconnect as a fallback
-          if (this.redis) {
-            this.redis.disconnect();
-          }
-        } finally {
-          // Remove all listeners to prevent memory leaks
-          if (this.redis) {
-            this.redis.removeAllListeners();
-            this.redis = null;
-          }
-          logger.info('Redis connection closed', {
-            metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-          });
+      if (this.useRedis && this.redis) {
+        const redisValue = await this.redis.get(key);
+        if (redisValue) {
+          const parsedValue = JSON.parse(redisValue);
+          this.memoryCache.set(key, parsedValue);
+          this.stats.hits.redis++;
+          this.updateLatency('get', startTime);
+          return parsedValue;
         }
+        this.stats.misses.redis++;
       }
 
-      // Flush the cache (don't wait for this to complete)
-      try {
-        this.cache.flushAll();
-        logger.info('Cache flushed during shutdown', {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-      } catch (flushError) {
-        logger.warn(`Error flushing cache: ${flushError.message}`, {
-          metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-        });
-      }
-
-      logger.info('CacheManager shutdown completed', {
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
+      this.stats.misses.memory++;
+      this.updateLatency('get', startTime);
+      return null;
     } catch (error) {
-      logger.error('Cache shutdown error:', {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'cache-manager', timestamp: new Date().toISOString() }
-      });
-      // Don't throw the error, just log it to prevent blocking shutdown
+      this.stats.operations.get.errors++;
+      logger.error(`Cache get error for key ${key}: ${error.message}`, { instanceId: this.instanceId });
+      return null;
     }
   }
 
-  /**
-   * Clear cache with error handling
-   */
-  async clearCache() {
+  async has(key) {
     try {
-      // Clear cache logic
+      if (!this.initialized) await this.initialize();
+      if (this.memoryCache.has(key)) return true;
+      if (this.useRedis && this.redis) return (await this.redis.exists(key)) === 1;
+      return false;
     } catch (error) {
-      logger.error('Cache clear error:', error);
+      logger.error(`Cache has error for key ${key}: ${error.message}`, { instanceId: this.instanceId });
+      return false;
+    }
+  }
+
+  async delete(key) {
+    try {
+      if (!this.initialized) await this.initialize();
+      this.memoryCache.del(key);
+      if (this.useRedis && this.redis) await this.redis.del(key);
+      this.stats.operations.delete.count++;
+      return true;
+    } catch (error) {
+      this.stats.operations.delete.errors++;
+      logger.error(`Cache delete error for key ${key}: ${error.message}`, { instanceId: this.instanceId });
+      return false;
+    }
+  }
+
+  async clear() {
+    try {
+      if (!this.initialized) await this.initialize();
+      this.memoryCache.flushAll();
+      if (this.useRedis && this.redis) await this.redis.flushdb();
+      logger.info('Cache cleared successfully', { instanceId: this.instanceId });
+      return true;
+    } catch (error) {
+      logger.error(`Cache clear error: ${error.message}`, { instanceId: this.instanceId });
+      return false;
+    }
+  }
+
+  async getKeys(pattern = '*') {
+    try {
+      if (!this.initialized) await this.initialize();
+      const memoryKeys = this.memoryCache.keys();
+      if (pattern === '*') return memoryKeys;
+
+      const regex = new RegExp(`^${pattern
+        .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+        .replace(/\*/g, '.*')
+        .replace(/\?/g, '.')}$`);
+      return memoryKeys.filter(key => regex.test(key));
+    } catch (error) {
+      logger.error(`Error getting keys with pattern ${pattern}: ${error.message}`, { instanceId: this.instanceId });
+      return [];
+    }
+  }
+
+  updateLatency(operation, startTime) {
+    this.stats.operations[operation].count++;
+    this.stats.operations[operation].latency.push(Date.now() - startTime);
+    if (this.stats.operations[operation].latency.length > 100) this.stats.operations[operation].latency.shift();
+  }
+
+  getStats() {
+    const uptime = Date.now() - this.startTime;
+    const totalHits = this.stats.hits.memory + this.stats.hits.redis;
+    const totalMisses = this.stats.misses.memory + this.stats.misses.redis;
+    const hitRate = totalHits + totalMisses > 0 ? Math.round((totalHits / (totalHits + totalMisses)) * 100) : 0;
+    const memoryUsage = process.memoryUsage();
+
+    const calcAvgLatency = (op) => this.stats.operations[op].latency.length > 0
+      ? Math.round(this.stats.operations[op].latency.reduce((a, b) => a + b, 0) / this.stats.operations[op].latency.length)
+      : 0;
+
+    return {
+      instance: { id: this.instanceId, uptime: `${Math.floor(uptime / 1000 / 60)} min`, startTime: new Date(this.startTime).toISOString() },
+      configuration: { useRedis: this.useRedis, ttl: this.options.stdTTL, maxKeys: this.options.maxKeys, memoryThreshold: this.memoryThreshold },
+      performance: {
+        hits: { memory: this.stats.hits.memory, redis: this.stats.hits.redis, total: totalHits },
+        misses: { memory: this.stats.misses.memory, redis: this.stats.misses.redis, total: totalMisses },
+        hitRate: `${hitRate}%`,
+        operations: {
+          get: { count: this.stats.operations.get.count, errors: this.stats.operations.get.errors, averageLatency: `${calcAvgLatency('get')}ms` },
+          set: { count: this.stats.operations.set.count, errors: this.stats.operations.set.errors, averageLatency: `${calcAvgLatency('set')}ms` },
+          delete: { count: this.stats.operations.delete.count, errors: this.stats.operations.delete.errors }
+        }
+      },
+      maintenance: {
+        memoryChecks: this.stats.memoryCheckCount,
+        cleanups: this.stats.cleanupCount,
+        redisReconnections: this.stats.redisReconnections,
+        lastCleanup: new Date(this.lastCleanupTime).toISOString()
+      },
+      memory: {
+        heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+        heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+        rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+        external: `${Math.round(memoryUsage.external / 1024 / 1024)}MB`,
+        usagePercentage: `${Math.round((memoryUsage.heapUsed / memoryUsage.heapTotal) * 100)}%`
+      },
+      cache: { memoryKeys: this.memoryCache.keys().length, memoryStats: this.memoryCache.getStats() },
+      timestamp: new Date().toISOString()
+    };
+  }
+
+  async healthCheck() {
+    try {
+      if (!this.initialized) await this.initialize();
+      const testKey = `_health_${Date.now()}`;
+      const testValue = { test: 'value', timestamp: Date.now() };
+
+      await this.set(testKey, testValue, 10);
+      const retrievedValue = await this.get(testKey);
+
+      let redisStatus = 'disabled';
+      if (this.useRedis && this.redis) redisStatus = (await this.redis.ping()) ? 'connected' : 'error';
+
+      const memoryUsage = process.memoryUsage();
+      const memoryPercentage = memoryUsage.heapUsed / memoryUsage.heapTotal;
+      let status = 'healthy';
+      if (!retrievedValue) status = 'degraded';
+      if (this.useRedis && redisStatus !== 'connected') status = status === 'healthy' ? 'warning' : 'degraded';
+      if (memoryPercentage > this.memoryThreshold) status = status === 'healthy' ? 'warning' : status;
+
+      return {
+        status,
+        memory: {
+          used: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+          total: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+          percentage: `${Math.round(memoryPercentage * 100)}%`,
+          status: memoryPercentage > this.memoryThreshold ? 'warning' : 'normal'
+        },
+        redis: { enabled: this.useRedis, status: redisStatus },
+        operations: { set: retrievedValue ? 'working' : 'failed', get: retrievedValue ? 'working' : 'failed' },
+        cache: { keys: this.memoryCache.keys().length, hitRate: `${this.getStats().performance.hitRate}` },
+        uptime: `${Math.floor((Date.now() - this.startTime) / 1000 / 60)} min`,
+        instance: this.instanceId,
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      logger.error(`Health check error: ${error.message}`, { instanceId: this.instanceId });
+      return { status: 'error', error: error.message, timestamp: new Date().toISOString() };
     }
   }
 }
 
-// Create middleware function that uses the CacheManager
-function createCacheMiddleware(duration) {
-  const manager = new CacheManager();
-  return manager.middleware(duration);
-}
-
-// Export both the CacheManager class and the middleware factory
-module.exports = {
-  CacheManager,
-  createCacheMiddleware
-};
+module.exports = { CacheManager };

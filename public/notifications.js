@@ -7,7 +7,7 @@ class NotificationSystem {
 
     initializeWebSocket() {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        this.ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+        this.ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
         
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);

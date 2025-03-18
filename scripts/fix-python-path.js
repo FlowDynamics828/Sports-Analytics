@@ -1,447 +1,539 @@
-// scripts/fix-memory-issues.js - Fix memory management issues
+// scripts/fix-python-path.js - Script to detect and fix Python path issues
 
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const winston = require('winston');
+const { spawn, execSync } = require('child_process');
 const os = require('os');
+const readline = require('readline');
+const { exec } = require('child_process');
 
-// Configure logging
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf(({ level, message, timestamp }) => {
-      return `${timestamp} ${level}: ${message}`;
-    })
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    new winston.transports.File({ filename: 'logs/fix-memory-issues.log' })
-  ]
+// ANSI color codes for better readability
+const colors = {
+  reset: '\x1b[0m',
+  bright: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m'
+};
+
+// Function to run a command and return a promise
+function runCommand(command, args = []) {
+  return new Promise((resolve, reject) => {
+    const cmd = Array.isArray(args) && args.length > 0 
+      ? `${command} ${args.join(' ')}` 
+      : command;
+      
+    exec(cmd, {
+      timeout: parseInt(process.env.PYTHON_EXECUTION_TIMEOUT || '60000'),
+      maxBuffer: 5 * 1024 * 1024 // Increase max buffer to 5MB
+    }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(stdout ? stdout : stderr);
+      }
+    });
+  });
+}
+
+// Print header
+console.log(`${colors.bright}${colors.cyan}Sports Analytics - Python Path Fix Tool${colors.reset}`);
+console.log(`${colors.cyan}=========================================${colors.reset}\n`);
+
+// Create readline interface for user input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
 });
 
-// Ensure logs directory exists
-try {
-  if (!fs.existsSync('logs')) {
-    fs.mkdirSync('logs');
+// Function to detect Python path
+async function detectPythonPath() {
+  console.log(`${colors.bright}Detecting Python Installation:${colors.reset}`);
+  
+  // Check environment variables first
+  const envPath = process.env.PYTHON_PATH || process.env.PYTHON_EXECUTABLE;
+  if (envPath) {
+    console.log(`  Found Python path in environment variables: ${envPath}`);
+    if (await testPythonPath(envPath)) {
+      return envPath;
+    }
+    console.log(`  ${colors.yellow}Python path from environment variables is not valid.${colors.reset}`);
   }
-} catch (error) {
-  console.error('Error creating logs directory:', error);
+  
+  // Check common paths based on platform
+  if (process.platform === 'win32') {
+    const commonPaths = [
+      'python',
+      'python3',
+      'C:\\Python39\\python.exe',
+      'C:\\Python310\\python.exe',
+      'C:\\Python311\\python.exe',
+      'C:\\Python312\\python.exe',
+      'C:\\ProgramData\\miniconda3\\python.exe',
+      'C:\\Windows\\py.exe',
+      // Add more common locations
+      'C:\\Users\\' + os.userInfo().username + '\\AppData\\Local\\Programs\\Python\\Python39\\python.exe',
+      'C:\\Users\\' + os.userInfo().username + '\\AppData\\Local\\Programs\\Python\\Python310\\python.exe',
+      'C:\\Users\\' + os.userInfo().username + '\\AppData\\Local\\Programs\\Python\\Python311\\python.exe',
+      'C:\\Users\\' + os.userInfo().username + '\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+      'C:\\Program Files\\Python39\\python.exe',
+      'C:\\Program Files\\Python310\\python.exe',
+      'C:\\Program Files\\Python311\\python.exe',
+      'C:\\Program Files\\Python312\\python.exe'
+    ];
+    
+    for (const pythonPath of commonPaths) {
+      try {
+        if (pythonPath === 'python' || pythonPath === 'python3' || fs.existsSync(pythonPath)) {
+          console.log(`  Found Python at: ${pythonPath}`);
+          if (await testPythonPath(pythonPath)) {
+            return pythonPath;
+          }
+        }
+      } catch (e) {
+        // Ignore errors and continue checking
+      }
+    }
+    
+    // Try using 'where' command on Windows
+    try {
+      const output = execSync('where python', { timeout: 10000 }).toString().trim().split('\r\n')[0];
+      if (output && await testPythonPath(output)) {
+        console.log(`  Found Python using 'where' command: ${output}`);
+        return output;
+      }
+    } catch (e) {
+      // Ignore errors and continue
+    }
+
+    // Try using 'py' command on Windows
+    try {
+      const output = execSync('where py', { timeout: 10000 }).toString().trim().split('\r\n')[0];
+      if (output && await testPythonPath(output)) {
+        console.log(`  Found Python launcher at: ${output}`);
+        return output;
+      }
+    } catch (e) {
+      // Ignore errors and continue
+    }
+  } else {
+    // On Unix-like systems, try using 'which' command
+    const commonUnixPaths = ['python3', 'python'];
+    
+    for (const pythonPath of commonUnixPaths) {
+      try {
+        const result = await testPythonPath(pythonPath);
+        if (result) {
+          console.log(`  Found working Python at: ${pythonPath}`);
+          return pythonPath;
+        }
+      } catch (error) {
+        // Continue to next path
+      }
+    }
+    
+    try {
+      const output = execSync('which python3 || which python', { timeout: 10000 }).toString().trim();
+      if (output && await testPythonPath(output)) {
+        console.log(`  Found Python using 'which' command: ${output}`);
+        return output;
+      }
+    } catch (e) {
+      // Ignore errors and continue
+    }
+  }
+  
+  // Default fallback
+  console.log(`  ${colors.yellow}Could not detect Python path automatically.${colors.reset}`);
+  return null;
+}
+
+// Function to test if Python path is valid
+async function testPythonPath(pythonPath) {
+  return new Promise((resolve) => {
+    try {
+      console.log(`  Testing Python path: ${pythonPath}...`);
+      
+      // Get timeout from env or use default
+      const timeoutDuration = parseInt(process.env.PYTHON_VERIFICATION_TIMEOUT, 10) || 60000; // Increased to 60 seconds
+      
+      // Create a more resilient python process
+      const pythonProcess = spawn(pythonPath, ['-c', 'import sys; print(f"Python {sys.version}")'], {
+        detached: true, // Detach process to make it less susceptible to interference
+        windowsHide: true, // Hide window on Windows
+        stdio: ['ignore', 'pipe', 'pipe'] // Redirect standard I/O
+      });
+      
+      let output = '';
+      let errorOutput = '';
+      
+      pythonProcess.stdout.on('data', (data) => {
+        output += data.toString();
+      });
+      
+      pythonProcess.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+      });
+      
+      pythonProcess.on('close', (code) => {
+        if (code === 0) {
+          console.log(`  Python version: ${colors.green}${output.trim()}${colors.reset}`);
+          resolve(true);
+        } else {
+          console.log(`  Python test failed: ${colors.red}${errorOutput}${colors.reset}`);
+          resolve(false);
+        }
+      });
+      
+      pythonProcess.on('error', (err) => {
+        console.log(`  Python process error for: ${pythonPath}: ${err.message}`);
+        resolve(false);
+      });
+      
+      // Set timeout with increased duration
+      const timeoutId = setTimeout(() => {
+        try {
+          // Check if process has exited already
+          if (pythonProcess.exitCode === null) {
+            // Try to kill the process gracefully first, then forcefully
+            process.kill(pythonProcess.pid, 'SIGTERM');
+            
+            // Force kill after 2 seconds if still running
+            setTimeout(() => {
+              try {
+                if (pythonProcess.exitCode === null) {
+                  process.kill(pythonProcess.pid, 'SIGKILL');
+                }
+              } catch (e) {
+                // Process might have already exited
+              }
+            }, 2000);
+            
+            console.log(`  Python test timed out for: ${pythonPath} after ${timeoutDuration/1000} seconds`);
+            console.log(`  This may be caused by anti-virus software or system resource constraints.`);
+            console.log(`  Try temporarily disabling real-time scanning or adding Python to exclusions.`);
+          }
+        } catch (e) {
+          // Process might have already exited
+          console.log(`  Error killing timed-out process: ${e.message}`);
+        }
+        // Still resolve as false if the test timed out
+        resolve(false);
+      }, timeoutDuration);
+      
+      // Clear timeout if process ends before timeout
+      pythonProcess.on('close', () => {
+        clearTimeout(timeoutId);
+      });
+      
+    } catch (error) {
+      console.log(`  Error testing Python path: ${error.message}`);
+      resolve(false);
+    }
+  });
+}
+
+// Function to update .env file with Python path
+async function updateEnvFile(pythonPath) {
+  console.log(`\n${colors.bright}Updating .env File:${colors.reset}`);
+  
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    
+    // Check if .env file exists
+    if (!fs.existsSync(envPath)) {
+      console.log(`  ${colors.yellow}.env file not found. Creating new file.${colors.reset}`);
+      fs.writeFileSync(envPath, `PYTHON_PATH=${pythonPath}\nPYTHON_EXECUTABLE=${pythonPath}\n`);
+      console.log(`  ${colors.green}Created .env file with Python path.${colors.reset}`);
+      return true;
+    }
+    
+    // Read existing .env file
+    let envContent = fs.readFileSync(envPath, 'utf8');
+    let updated = false;
+    
+    // Update PYTHON_PATH
+    if (envContent.includes('PYTHON_PATH=')) {
+      const currentPath = envContent.match(/PYTHON_PATH=(.*)(\r?\n|$)/)[1];
+      if (currentPath !== pythonPath) {
+        envContent = envContent.replace(/PYTHON_PATH=.*(\r?\n|$)/, `PYTHON_PATH=${pythonPath}$1`);
+        updated = true;
+      }
+    } else {
+      envContent += `\nPYTHON_PATH=${pythonPath}`;
+      updated = true;
+    }
+    
+    // Update PYTHON_EXECUTABLE
+    if (envContent.includes('PYTHON_EXECUTABLE=')) {
+      const currentPath = envContent.match(/PYTHON_EXECUTABLE=(.*)(\r?\n|$)/)[1];
+      if (currentPath !== pythonPath) {
+        envContent = envContent.replace(/PYTHON_EXECUTABLE=.*(\r?\n|$)/, `PYTHON_EXECUTABLE=${pythonPath}$1`);
+        updated = true;
+      }
+    } else {
+      envContent += `\nPYTHON_EXECUTABLE=${pythonPath}`;
+      updated = true;
+    }
+    
+    // Update PYTHON_VERIFICATION_TIMEOUT
+    if (envContent.includes('PYTHON_VERIFICATION_TIMEOUT=')) {
+      const currentTimeout = envContent.match(/PYTHON_VERIFICATION_TIMEOUT=(\d+)(\r?\n|$)/)[1];
+      if (parseInt(currentTimeout, 10) < 60000) { // Increase timeout if less than 60s
+        envContent = envContent.replace(/PYTHON_VERIFICATION_TIMEOUT=\d+(\r?\n|$)/, `PYTHON_VERIFICATION_TIMEOUT=60000$1`);
+        updated = true;
+      }
+    } else {
+      envContent += `\nPYTHON_VERIFICATION_TIMEOUT=60000`;
+      updated = true;
+    }
+    
+    // Add Python bridge settings if they don't exist
+    if (!envContent.includes('PYTHON_BRIDGE_MAX_RETRIES=')) {
+      envContent += `\nPYTHON_BRIDGE_MAX_RETRIES=3`;
+      updated = true;
+    }
+    
+    if (!envContent.includes('PYTHON_EXECUTION_TIMEOUT=')) {
+      envContent += `\nPYTHON_EXECUTION_TIMEOUT=60000`;
+      updated = true;
+    }
+    
+    if (!envContent.includes('PYTHON_PROCESS_TERMINATION_TIMEOUT=')) {
+      envContent += `\nPYTHON_PROCESS_TERMINATION_TIMEOUT=10000`;
+      updated = true;
+    }
+    
+    // Write updated content back to .env file if changes were made
+    if (updated) {
+      fs.writeFileSync(envPath, envContent);
+      console.log(`  ${colors.green}Updated .env file with Python path: ${pythonPath}${colors.reset}`);
+    } else {
+      console.log(`  ${colors.green}.env file already contains correct Python path.${colors.reset}`);
+    }
+    
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
+    return false;
+  }
+}
+
+// Function to ask for manual Python path input
+function askForPythonPath() {
+  return new Promise((resolve) => {
+    rl.question(`\n${colors.yellow}Please enter the path to your Python executable (or press Enter to use 'python'):\n${colors.reset}`, (input) => {
+      const pythonPath = input.trim() || 'python';
+      resolve(pythonPath);
+    });
+  });
+}
+
+// Function to check Python packages
+async function checkPythonPackages(pythonPath) {
+  console.log(`\n${colors.bright}Checking Python Packages:${colors.reset}`);
+  // Modified script with try/except to be more resilient
+  const checkScript = `
+try:
+    import pkg_resources
+    required = {'numpy', 'pandas', 'scikit-learn'}
+    installed = {pkg.key for pkg in pkg_resources.working_set}
+    missing = required - installed
+    if missing:
+        print(f"Missing packages: {missing}")
+    else:
+        print("All required packages are installed")
+except Exception as e:
+    print(f"Error checking packages: {str(e)}")
+    import sys
+    # Always print something so we know Python runs
+    print(f"Python version: {sys.version}")
+  `;
+  
+  try {
+    // Use spawn instead of exec for better control
+    const pythonProcess = spawn(pythonPath, ['-c', checkScript]);
+    
+    let output = '';
+    let errorOutput = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    const result = await new Promise((resolve, reject) => {
+      pythonProcess.on('close', (code) => {
+        if (code === 0) {
+          resolve(output);
+        } else {
+          reject(new Error(`Process exited with code ${code}: ${errorOutput}`));
+        }
+      });
+      
+      pythonProcess.on('error', (err) => {
+        reject(new Error(`Process error: ${err.message}`));
+      });
+      
+      // Timeout for package check - 30 seconds
+      setTimeout(() => {
+        try {
+          pythonProcess.kill();
+        } catch (e) {
+          // Process might have already exited
+        }
+        reject(new Error('Package check timed out after 30 seconds'));
+      }, 30000);
+    });
+    
+    console.log(`  ${colors.green}${result.trim()}${colors.reset}`);
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}Package check error: ${error.message}${colors.reset}`);
+    console.log(`  This is often not critical - will continue with installation.`);
+    return false;
+  }
+}
+
+// Function to test Python script execution
+async function testPythonScript(pythonPath) {
+  const scriptPath = path.join(process.cwd(), 'scripts', 'predictive_model.py');
+  
+  // Check if script exists first
+  if (!fs.existsSync(scriptPath)) {
+    console.log(`  ${colors.yellow}Script not found at: ${scriptPath}${colors.reset}`);
+    console.log(`  Looking for script in alternative locations...`);
+    
+    // Try to find the script in other locations
+    const possiblePaths = [
+      path.join(process.cwd(), 'predictive_model.py'),
+      path.join(process.cwd(), 'model', 'predictive_model.py'),
+      path.join(process.cwd(), 'models', 'predictive_model.py'),
+      path.join(process.cwd(), 'src', 'scripts', 'predictive_model.py'),
+      path.join(process.cwd(), 'src', 'predictive_model.py')
+    ];
+    
+    for (const altPath of possiblePaths) {
+      if (fs.existsSync(altPath)) {
+        console.log(`  ${colors.green}Found script at alternative location: ${altPath}${colors.reset}`);
+        scriptPath = altPath;
+        break;
+      }
+    }
+    
+    if (!fs.existsSync(scriptPath)) {
+      console.log(`  ${colors.red}Could not find predictive_model.py script${colors.reset}`);
+      return false;
+    }
+  }
+  
+  const testData = JSON.stringify({
+    type: 'health_check'
+  });
+  
+  try {
+    console.log(`  Testing Python script execution: ${scriptPath}`);
+    const pythonProcess = spawn(pythonPath, [scriptPath, testData]);
+    
+    let output = '';
+    let errorOutput = '';
+    
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    pythonProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    const result = await new Promise((resolve, reject) => {
+      pythonProcess.on('close', (code) => {
+        if (code === 0) {
+          resolve(output || 'No output but script executed successfully');
+        } else {
+          reject(new Error(`Script exited with code ${code}: ${errorOutput}`));
+        }
+      });
+      
+      pythonProcess.on('error', (err) => {
+        reject(new Error(`Script error: ${err.message}`));
+      });
+      
+      // Timeout for script execution - 60 seconds
+      setTimeout(() => {
+        try {
+          pythonProcess.kill();
+        } catch (e) {
+          // Process might have already exited
+        }
+        reject(new Error('Script execution timed out after 60 seconds'));
+      }, 60000);
+    });
+    
+    console.log(`  ${colors.green}✓ Python script executed successfully: ${result.trim()}${colors.reset}`);
+    return true;
+  } catch (error) {
+    console.log(`  ${colors.red}✗ Python script execution failed: ${error.message}${colors.reset}`);
+    return false;
+  }
 }
 
 // Main function
 async function main() {
-  logger.info('Starting memory management fix...');
-
-  // 1. Update .env file with memory management settings
+  let overallStatus = true;
   try {
-    const envPath = path.join(process.cwd(), '.env');
-    if (fs.existsSync(envPath)) {
-      let envContent = fs.readFileSync(envPath, 'utf8');
-      
-      // Add or update memory management settings
-      const memorySettings = `
-# Memory Management
-MEMORY_USAGE_THRESHOLD=0.85
-CACHE_MAX_ITEMS=250
-CACHE_CHECK_PERIOD=300
-ENABLE_AGGRESSIVE_GC=true
-ENABLE_PERFORMANCE_LOGGING=false`;
-      
-      // Check if memory management settings already exist
-      if (envContent.includes('# Memory Management')) {
-        // Find the memory management section
-        const memorySettingsStart = envContent.indexOf('# Memory Management');
-        const memorySettingsEnd = envContent.indexOf('#', memorySettingsStart + 1);
-        
-        if (memorySettingsEnd !== -1) {
-          // Replace the entire memory management section
-          envContent = envContent.slice(0, memorySettingsStart) + memorySettings + '\n\n' + envContent.slice(memorySettingsEnd);
-        } else {
-          // Replace until the end of the file
-          envContent = envContent.slice(0, memorySettingsStart) + memorySettings;
-        }
-      } else {
-        // Add new memory management settings
-        envContent += '\n' + memorySettings + '\n';
-      }
-      
-      fs.writeFileSync(envPath, envContent);
-      logger.info('Updated memory management settings in .env file');
-    } else {
-      logger.warn('.env file not found');
+    console.log(`${colors.yellow}Note: If you experience timeouts, consider adding Python to your antivirus exclusions${colors.reset}`);
+    console.log(`${colors.yellow}or temporarily disabling real-time scanning during this setup.${colors.reset}\n`);
+    
+    let pythonPath = await detectPythonPath();
+    if (!pythonPath) {
+      pythonPath = await askForPythonPath();
     }
+    
+    const updated = await updateEnvFile(pythonPath);
+    if (updated) {
+      console.log(`\n${colors.green}Python path updated successfully.${colors.reset}`);
+    } else {
+      console.log(`\n${colors.red}Failed to update Python path.${colors.reset}`);
+      overallStatus = false;
+    }
+    
+    const packagesOk = await checkPythonPackages(pythonPath);
+    if (!packagesOk) {
+      console.log(`\n${colors.yellow}Warning: Could not verify all Python packages.${colors.reset}`);
+      overallStatus = false;
+    }
+    
+    const scriptOk = await testPythonScript(pythonPath);
+    if (!scriptOk) {
+      console.log(`\n${colors.yellow}Warning: Could not verify Python script execution.${colors.reset}`);
+      overallStatus = false;
+    }
+    
+    if (overallStatus) {
+      console.log(`\n${colors.green}Python setup completed successfully!${colors.reset}`);
+    } else {
+      console.log(`\n${colors.yellow}Python setup completed with warnings.${colors.reset}`);
+      console.log(`${colors.yellow}You may still be able to use the system, but some features might not work as expected.${colors.reset}`);
+    }
+    
   } catch (error) {
-    logger.error(`Error updating .env file: ${error.message}`);
+    console.error(`\n${colors.red}Error:${colors.reset} ${error.message}`);
+    if (error.stack) {
+      console.error(`\n${colors.dim}${error.stack}${colors.reset}`);
+    }
+  } finally {
+    rl.close();
   }
-
-  // 2. Create optimize-memory.js script
-  try {
-    const optimizeMemoryPath = path.join(process.cwd(), 'scripts', 'optimize-memory.js');
-    
-    // Create scripts directory if it doesn't exist
-    if (!fs.existsSync(path.join(process.cwd(), 'scripts'))) {
-      fs.mkdirSync(path.join(process.cwd(), 'scripts'), { recursive: true });
-    }
-    
-    // Create optimize-memory.js script
-    const optimizeMemoryContent = `// scripts/optimize-memory.js - Memory optimization script
-
-require('dotenv').config();
-const winston = require('winston');
-const os = require('os');
-
-// Configure logging
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf(({ level, message, timestamp }) => {
-      return \`\${timestamp} \${level}: \${message}\`;
-    })
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    new winston.transports.File({ filename: 'logs/memory-optimization.log' })
-  ]
-});
-
-// Memory optimization module
-const memoryOptimizer = {
-  // Track optimization history
-  history: [],
-  
-  // Track intervals
-  intervals: [],
-  
-  // Start memory monitoring
-  start: function(interval = 300000) { // Default: check every 5 minutes
-    logger.info('Starting memory optimization module');
-    
-    // Clear any existing intervals
-    this.stop();
-    
-    // Start memory monitoring
-    const monitorInterval = setInterval(() => {
-      this.checkMemoryUsage();
-    }, interval);
-    
-    this.intervals.push(monitorInterval);
-    
-    // Return the module for chaining
-    return this;
-  },
-  
-  // Stop memory monitoring
-  stop: function() {
-    logger.info('Stopping memory optimization module');
-    
-    // Clear all intervals
-    this.intervals.forEach(interval => clearInterval(interval));
-    this.intervals = [];
-    
-    // Return the module for chaining
-    return this;
-  },
-  
-  // Check memory usage and optimize if needed
-  checkMemoryUsage: function() {
-    const memoryUsage = process.memoryUsage();
-    const heapUsed = memoryUsage.heapUsed;
-    const heapTotal = memoryUsage.heapTotal;
-    const memoryRatio = heapUsed / heapTotal;
-    const threshold = parseFloat(process.env.MEMORY_USAGE_THRESHOLD) || 0.85;
-    
-    // Format memory values for logging (in MB)
-    const heapUsedMB = Math.round(heapUsed / (1024 * 1024));
-    const heapTotalMB = Math.round(heapTotal / (1024 * 1024));
-    const usagePercentage = Math.round(memoryRatio * 100);
-    
-    logger.info(\`Memory usage: \${usagePercentage}% (\${heapUsedMB}MB / \${heapTotalMB}MB)\`);
-    
-    // Check if memory usage exceeds threshold
-    if (memoryRatio > threshold) {
-      logger.warn(\`High memory usage detected: \${usagePercentage}% of heap used (\${heapUsedMB}MB / \${heapTotalMB}MB)\`);
-      this.optimizeMemory(memoryRatio);
-    }
-    
-    // Record memory usage history
-    this.history.push({
-      timestamp: new Date(),
-      heapUsed: heapUsedMB,
-      heapTotal: heapTotalMB,
-      percentage: usagePercentage
-    });
-    
-    // Keep only the last 100 entries
-    if (this.history.length > 100) {
-      this.history.shift();
-    }
-  },
-  
-  // Optimize memory usage
-  optimizeMemory: function(currentUsage) {
-    logger.info('Starting memory optimization');
-    
-    // Record optimization start time
-    const startTime = process.hrtime();
-    
-    // 1. Clear module caches for non-essential modules
-    this.clearModuleCache();
-    
-    // 2. Clear any global caches
-    this.clearGlobalCaches();
-    
-    // 3. Force garbage collection if available
-    if (global.gc) {
-      logger.info('Running garbage collection');
-      global.gc();
-    } else {
-      logger.info('Garbage collection not available. Run with --expose-gc flag for better optimization.');
-    }
-    
-    // 4. Check memory usage after optimization
-    const memoryUsage = process.memoryUsage();
-    const heapUsed = memoryUsage.heapUsed;
-    const heapTotal = memoryUsage.heapTotal;
-    const memoryRatio = heapUsed / heapTotal;
-    
-    // Format memory values for logging (in MB)
-    const heapUsedMB = Math.round(heapUsed / (1024 * 1024));
-    const heapTotalMB = Math.round(heapTotal / (1024 * 1024));
-    const usagePercentage = Math.round(memoryRatio * 100);
-    
-    // Calculate optimization duration
-    const [seconds, nanoseconds] = process.hrtime(startTime);
-    const duration = seconds + nanoseconds / 1e9;
-    
-    logger.info(\`Memory optimization completed in \${duration.toFixed(2)}s\`);
-    logger.info(\`Memory usage after optimization: \${usagePercentage}% (\${heapUsedMB}MB / \${heapTotalMB}MB)\`);
-    
-    // Calculate memory saved
-    const savedPercentage = Math.round((currentUsage - memoryRatio) * 100);
-    if (savedPercentage > 0) {
-      logger.info(\`Memory optimization saved \${savedPercentage}% of heap usage\`);
-    } else {
-      logger.warn('Memory optimization did not reduce memory usage');
-    }
-    
-    return {
-      before: Math.round(currentUsage * 100),
-      after: usagePercentage,
-      saved: savedPercentage,
-      duration: duration.toFixed(2)
-    };
-  },
-  
-  // Clear module cache for non-essential modules
-  clearModuleCache: function() {
-    const essentialModules = [
-      'fs', 'path', 'os', 'http', 'https', 'net', 'events',
-      'stream', 'util', 'winston', 'dotenv'
-    ];
-    
-    let cleared = 0;
-    
-    // Clear module cache for non-essential modules
-    Object.keys(require.cache).forEach(moduleId => {
-      const isEssential = essentialModules.some(name => 
-        moduleId.includes(\`/node_modules/\${name}/\`) || 
-        moduleId.includes(\`\\\\\${name}\\\\\`) ||
-        moduleId.includes(\`/\${name}/\`)
-      );
-      
-      if (!isEssential && !moduleId.includes('node_modules')) {
-        delete require.cache[moduleId];
-        cleared++;
-      }
-    });
-    
-    logger.info(\`Cleared \${cleared} module caches\`);
-  },
-  
-  // Clear global caches
-  clearGlobalCaches: function() {
-    let cleared = 0;
-    
-    // Clear global caches if they exist
-    if (global.cache && typeof global.cache.clear === 'function') {
-      global.cache.clear();
-      cleared++;
-    }
-    
-    if (global.memoryCache && typeof global.memoryCache.clear === 'function') {
-      global.memoryCache.clear();
-      cleared++;
-    }
-    
-    if (global.apiCache && typeof global.apiCache.clear === 'function') {
-      global.apiCache.clear();
-      cleared++;
-    }
-    
-    logger.info(\`Cleared \${cleared} global caches\`);
-  },
-  
-  // Get memory usage history
-  getHistory: function() {
-    return this.history;
-  },
-  
-  // Get system memory information
-  getSystemMemory: function() {
-    const totalMemory = os.totalmem();
-    const freeMemory = os.freemem();
-    
-    return {
-      total: Math.round(totalMemory / (1024 * 1024)),
-      free: Math.round(freeMemory / (1024 * 1024)),
-      used: Math.round((totalMemory - freeMemory) / (1024 * 1024)),
-      percentage: Math.round(((totalMemory - freeMemory) / totalMemory) * 100)
-    };
-  },
-  
-  // Run a full optimization
-  runFullOptimization: function() {
-    logger.info('Running full memory optimization');
-    
-    // Get current memory usage
-    const memoryUsage = process.memoryUsage();
-    const currentUsage = memoryUsage.heapUsed / memoryUsage.heapTotal;
-    
-    // Run optimization
-    const result = this.optimizeMemory(currentUsage);
-    
-    // Run garbage collection again after a short delay
-    setTimeout(() => {
-      if (global.gc) {
-        global.gc();
-        logger.info('Ran second garbage collection pass');
-      }
-    }, 1000);
-    
-    return result;
-  }
-};
-
-// Export the memory optimizer
-module.exports = memoryOptimizer;
-
-// If run directly, start the optimizer
-if (require.main === module) {
-  logger.info('Running memory optimization');
-  
-  // Run full optimization
-  const result = memoryOptimizer.runFullOptimization();
-  
-  // Log system memory information
-  const systemMemory = memoryOptimizer.getSystemMemory();
-  logger.info(\`System memory: \${systemMemory.used}MB used of \${systemMemory.total}MB total (\${systemMemory.percentage}%)\`);
-  
-  // Exit after optimization
-  setTimeout(() => {
-    logger.info('Memory optimization completed');
-    process.exit(0);
-  }, 2000);
-}`;
-    
-    fs.writeFileSync(optimizeMemoryPath, optimizeMemoryContent);
-    logger.info('Created optimize-memory.js script');
-  } catch (error) {
-    logger.error(`Error creating optimize-memory.js script: ${error.message}`);
-  }
-
-  // 3. Update package.json with memory optimization scripts
-  try {
-    const packageJsonPath = path.join(process.cwd(), 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      
-      // Add memory optimization scripts
-      if (!packageJson.scripts) {
-        packageJson.scripts = {};
-      }
-      
-      // Add or update scripts
-      packageJson.scripts['optimize:memory'] = 'node scripts/optimize-memory.js';
-      packageJson.scripts['start:optimized'] = 'node --max-old-space-size=4096 --expose-gc startup.js';
-      
-      // Write updated package.json
-      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-      logger.info('Updated package.json with memory optimization scripts');
-    } else {
-      logger.warn('package.json not found');
-    }
-  } catch (error) {
-    logger.error(`Error updating package.json: ${error.message}`);
-  }
-
-  // 4. Analyze system memory resources
-  try {
-    const totalMemory = os.totalmem();
-    const freeMemory = os.freemem();
-    const totalMemoryGB = (totalMemory / (1024 * 1024 * 1024)).toFixed(2);
-    const freeMemoryGB = (freeMemory / (1024 * 1024 * 1024)).toFixed(2);
-    const memoryUsagePercent = ((totalMemory - freeMemory) / totalMemory * 100).toFixed(2);
-    
-    logger.info(`System memory analysis:`);
-    logger.info(`Total memory: ${totalMemoryGB} GB`);
-    logger.info(`Free memory: ${freeMemoryGB} GB`);
-    logger.info(`Memory usage: ${memoryUsagePercent}%`);
-    
-    // Determine optimal Node.js memory limit based on system resources
-    let recommendedMemoryLimit = 4096; // Default: 4GB
-    
-    if (totalMemory < 4 * 1024 * 1024 * 1024) {
-      // Less than 4GB total memory
-      recommendedMemoryLimit = 1024; // 1GB
-    } else if (totalMemory < 8 * 1024 * 1024 * 1024) {
-      // 4-8GB total memory
-      recommendedMemoryLimit = 2048; // 2GB
-    } else if (totalMemory < 16 * 1024 * 1024 * 1024) {
-      // 8-16GB total memory
-      recommendedMemoryLimit = 4096; // 4GB
-    } else {
-      // More than 16GB total memory
-      recommendedMemoryLimit = 8192; // 8GB
-    }
-    
-    logger.info(`Recommended Node.js memory limit: ${recommendedMemoryLimit}MB`);
-    
-    // Update start:optimized script with recommended memory limit
-    const packageJsonPath = path.join(process.cwd(), 'package.json');
-    if (fs.existsSync(packageJsonPath)) {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      
-      if (packageJson.scripts && packageJson.scripts['start:optimized']) {
-        packageJson.scripts['start:optimized'] = `node --max-old-space-size=${recommendedMemoryLimit} --expose-gc startup.js`;
-        
-        // Write updated package.json
-        fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-        logger.info(`Updated start:optimized script with memory limit of ${recommendedMemoryLimit}MB`);
-      }
-    }
-  } catch (error) {
-    logger.error(`Error analyzing system memory resources: ${error.message}`);
-  }
-
-  logger.info('Memory management fix completed successfully');
 }
 
-// Run the main function
-main().catch(error => {
-  logger.error(`Error in fix-memory-issues.js: ${error.message}`);
-  logger.error(error.stack);
-  process.exit(1);
-});
+main();

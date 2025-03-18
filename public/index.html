@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sports Analytics Pro - Professional Sports Data & Analytics</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
     <style>
         .gradient-text {
             background: linear-gradient(90deg, #3B82F6 0%, #8B5CF6 100%);
@@ -313,5 +315,14 @@
             </div>
         </div>
     </footer>
+    <script src="scripts/index.js"></script>
+    <script>
+      const apiBaseUrl = 'http://localhost:5050/api';
+      // Example usage
+      fetch(`${apiBaseUrl}/health`)
+        .then(response => response.json())
+        .then(data => console.log(data))
+        .catch(error => console.error('Error:', error));
+    </script>
 </body>
 </html>

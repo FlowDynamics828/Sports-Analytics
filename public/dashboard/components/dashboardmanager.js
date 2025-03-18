@@ -188,7 +188,8 @@ class DashboardManager {
 
     connectWebSocket() {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        this.ws = new WebSocket(`${protocol}//${window.location.host}`);
+        const wsPort = process.env.WS_PORT || 5150;
+        this.ws = new WebSocket(`${protocol}//${window.location.hostname}:${wsPort}/ws`);
         
         this.ws.onopen = () => {
             console.log('WebSocket connected');

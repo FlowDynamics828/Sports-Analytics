@@ -1,112 +1,66 @@
 // test-mongodb-connection.js
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
-const winston = require('winston');
 
-// Configure logger
-const logger = winston.createLogger({
-  level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.printf(({ level, message, timestamp }) => {
-      return `${timestamp} ${level.toUpperCase()}: ${message}`;
-    })
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  ]
-});
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics';
+const DB_NAME = process.env.MONGODB_DB_NAME || 'sports-analytics';
 
-async function testMongoDBConnection() {
-  logger.info('Testing MongoDB connection...');
-  
-  const url = process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics';
-  logger.info(`Connecting to MongoDB at: ${url}`);
-  
-  let client;
+async function testConnection() {
+  let client = null;
   
   try {
+    console.log('Testing MongoDB connection...');
+    
+    // Create client with appropriate options
+    client = new MongoClient(MONGODB_URI, {
+      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
+      minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
+      connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 30000,
+      socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 45000
+    });
+    
     // Connect to MongoDB
-    client = new MongoClient(url, {
-      maxPoolSize: 10,
-      connectTimeoutMS: 5000,
-      socketTimeoutMS: 10000
-    });
-    
     await client.connect();
-    logger.info('Successfully connected to MongoDB');
+    console.log('Connected to MongoDB server');
     
-    // Get database reference
-    const dbName = process.env.MONGODB_DB_NAME || 'sports-analytics';
-    const db = client.db(dbName);
-    logger.info(`Using database: ${dbName}`);
+    // Test database access
+    const db = client.db(DB_NAME);
     
-    // Verify connection with a ping command
-    const pingResult = await db.command({ ping: 1 });
-    logger.info(`Ping command result: ${JSON.stringify(pingResult)}`);
-    
-    // List collections
+    // Try to list collections
     const collections = await db.listCollections().toArray();
-    logger.info(`Found ${collections.length} collections in the database`);
-    collections.forEach((collection, index) => {
-      logger.info(`${index + 1}. ${collection.name}`);
-    });
+    console.log(`Found ${collections.length} collections in the database`);
     
-    // Test a simple insert and find operation
-    const testCollection = db.collection('connection_test');
+    // Print collection names
+    if (collections.length > 0) {
+      console.log('Collections:');
+      collections.forEach(collection => {
+        console.log(`- ${collection.name}`);
+      });
+    }
     
-    // Insert a test document
-    const insertResult = await testCollection.insertOne({
-      test: true,
-      timestamp: new Date(),
-      message: 'MongoDB connection test'
-    });
-    logger.info(`Inserted test document with ID: ${insertResult.insertedId}`);
-    
-    // Find the test document
-    const foundDocument = await testCollection.findOne({ test: true });
-    logger.info(`Found test document: ${JSON.stringify(foundDocument)}`);
-    
-    // Clean up - delete the test document
-    const deleteResult = await testCollection.deleteOne({ _id: foundDocument._id });
-    logger.info(`Deleted test document: ${deleteResult.deletedCount} document(s) removed`);
-    
-    logger.info('MongoDB connection test completed successfully');
-    return true;
+    console.log('MongoDB connection test passed successfully!');
+    process.exit(0);
   } catch (error) {
-    logger.error(`MongoDB connection test failed: ${error.message}`);
-    logger.error(error.stack);
-    return false;
+    console.error(`MongoDB connection test failed: ${error.message}`);
+    
+    if (error.message.includes('ECONNREFUSED')) {
+      console.error('Error: Could not connect to MongoDB server. Make sure MongoDB is running.');
+    } else if (error.message.includes('Authentication failed')) {
+      console.error('Error: Authentication failed. Check your MongoDB credentials.');
+    } else if (error.message.includes('not authorized')) {
+      console.error('Error: Not authorized to access the database. Check your MongoDB user permissions.');
+    }
+    
+    process.exit(1);
   } finally {
-    // Close the connection
     if (client) {
       await client.close();
-      logger.info('MongoDB connection closed');
     }
   }
 }
 
-// Run the test if this script is executed directly
-if (require.main === module) {
-  testMongoDBConnection()
-    .then(success => {
-      if (success) {
-        logger.info('MongoDB connection test passed');
-        process.exit(0);
-      } else {
-        logger.error('MongoDB connection test failed');
-        process.exit(1);
-      }
-    })
-    .catch(error => {
-      logger.error(`Unexpected error: ${error.message}`);
-      process.exit(1);
-    });
-}
-
-module.exports = testMongoDBConnection;
+// Run test
+testConnection().catch(error => {
+  console.error(`Unhandled error: ${error.message}`);
+  process.exit(1);
+});

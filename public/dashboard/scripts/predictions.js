@@ -1,7 +1,7 @@
 // Dashboard Predictions Integration Component
 // This connects the dashboard to the backend predictive model capabilities
 
-import { Toast } from './toast.js';
+import Toast from './toast.js';
 import { LoadingState } from './loadingstate.js';
 
 class PredictionManager {

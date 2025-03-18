@@ -1,4 +1,4 @@
-const { body, validationResult } = require('express-validator');
+const { body, validationResult, param, query } = require('express-validator');
 
 const validatePreferences = [
     body('notifications').isObject(),
@@ -12,4 +12,21 @@ const validatePreferences = [
     }
 ];
 
-module.exports = { validatePreferences };
+const validateTeamId = () => [
+    param('teamId').isString().trim().notEmpty()
+];
+
+const validateLeague = () => [
+    query('league').optional().isString().trim()
+];
+
+const validatePredictionType = () => [
+    param('type').isIn(['game', 'season', 'player', 'trend'])
+];
+
+module.exports = {
+    validatePreferences,
+    validateTeamId,
+    validateLeague,
+    validatePredictionType
+};

@@ -524,7 +524,7 @@ router.post('/refresh-token', async (req, res) => {
             });
         }
 
-        const user = await req.app.locals.db.collection('users').findOne({ _id: userId });
+        const user = await req.app.locals.db.collection('users').findOne({ _id: new ObjectId(userId) });
         if (!user) {
             return res.status(401).json({
                 error: 'User not found'

@@ -240,6 +240,18 @@ class SecurityManager {
             throw new Error(`Rate limit check failed: ${error.message}`);
         }
     }
+
+    static hashPassword(password) {
+        return crypto.createHash('sha256').update(password).digest('hex');
+    }
+
+    static verifyPassword(password, hash) {
+        return SecurityManager.hashPassword(password) === hash;
+    }
+
+    static generateToken() {
+        return crypto.randomBytes(16).toString('hex');
+    }
 }
 
 // Export the SecurityManager class

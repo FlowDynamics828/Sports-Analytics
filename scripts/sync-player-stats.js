@@ -1,10 +1,9 @@
-// scripts/sync-player-stats.js
+require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const axios = require('axios');
-require('dotenv').config();
+const winston = require('winston');
 const cron = require('node-cron');
 const path = require('path');
-const winston = require('winston');
 const { format } = winston;
 const { DatabaseManager } = require('../utils/db');
 
@@ -17,19 +16,19 @@ const logger = winston.createLogger({
     format.json(),
     format.metadata()
   ),
-  defaultMeta: { service: 'sync-player-stats', version: '2.0.0' },
+  defaultMeta: { service: 'sync-player-stats' },
   transports: [
     new winston.transports.File({
-      filename: 'logs/player-stats-error.log',
+      filename: 'error.log',
       level: 'error',
-      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 10000000,
-      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 5,
+      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 5000000,
+      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 3,
       tailable: true
     }),
     new winston.transports.File({
-      filename: 'logs/player-stats.log',
-      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 10000000,
-      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 5,
+      filename: 'combined.log',
+      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 5000000,
+      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 3,
       tailable: true
     }),
     new winston.transports.Console({
@@ -44,11 +43,8 @@ const logger = winston.createLogger({
 // MongoDB connection details from .env
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://SportAnalytics:Studyhard%402034@cluster0.et16d.mongodb.net/sports-analytics?retryWrites=true&w=majority&appName=Cluster0';
 const DB_NAME = process.env.MONGODB_DB_NAME || 'sports-analytics';
-
-// TheSportsDB V2 API configuration
-const SPORTSDB_API_KEY = process.env.SPORTSDB_API_KEY || '447279';
-const SPORTSDB_BASE_URL = process.env.SPORTSDB_BASE_URL || 'https://www.thesportsdb.com/api/v2/json';
-const API_TIMEOUT = parseInt(process.env.SPORTSDB_REQUEST_TIMEOUT, 10) || 30000;
+const SPORTS_API_URL = process.env.SPORTS_API_URL;
+const SPORTS_API_KEY = process.env.SPORTS_API_KEY;
 
 // Supported leagues
 const SUPPORTED_LEAGUES = [
@@ -56,28 +52,56 @@ const SUPPORTED_LEAGUES = [
   'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
 ];
 
-// TheSportsDB league IDs
-const LEAGUE_IDS = {
-  NFL: 4391,
-  NBA: 4387,
-  MLB: 4424,
-  NHL: 4380,
-  PREMIER_LEAGUE: 4328,
-  LA_LIGA: 4335,
-  BUNDESLIGA: 4331,
-  SERIE_A: 4332
-};
-
-// Sports mapping for V2 API
-const SPORTS_MAPPING = {
-  NFL: "american_football",
-  NBA: "basketball",
-  MLB: "baseball",
-  NHL: "ice_hockey",
-  PREMIER_LEAGUE: "soccer",
-  LA_LIGA: "soccer",
-  BUNDESLIGA: "soccer",
-  SERIE_A: "soccer"
+// API configuration - Update with your actual API endpoints and keys
+const API_CONFIG = {
+  NBA: {
+    url: 'https://api.sportsdata.io/v3/nba',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4387
+  },
+  NFL: {
+    url: 'https://api.sportsdata.io/v3/nfl',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByWeek',
+    competitionId: 4391
+  },
+  MLB: {
+    url: 'https://api.sportsdata.io/v3/mlb',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4424
+  },
+  NHL: {
+    url: 'https://api.sportsdata.io/v3/nhl',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4380
+  },
+  PREMIER_LEAGUE: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4328
+  },
+  LA_LIGA: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4335
+  },
+  BUNDESLIGA: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4331
+  },
+  SERIE_A: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    statsEndpoint: '/stats/json/PlayerGameStatsByDate',
+    competitionId: 4332
+  }
 };
 
 // Database manager instance
@@ -93,10 +117,10 @@ async function initializeDatabaseManager() {
       uri: MONGODB_URI,
       name: DB_NAME,
       options: {
-        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
-        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
-        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 10000,
-        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 30000
+        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 10,
+        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 1,
+        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 5000,
+        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 10000
       }
     });
     
@@ -122,10 +146,10 @@ async function syncPlayerStats() {
       client = await MongoClient.connect(MONGODB_URI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
-        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
-        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 10000,
-        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 30000
+        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 10,
+        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 1,
+        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 5000,
+        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 10000
       });
       
       logger.info('MongoDB connection established for player stats synchronization');
@@ -136,7 +160,7 @@ async function syncPlayerStats() {
     // Sync for each league
     for (const league of SUPPORTED_LEAGUES) {
       try {
-        await syncLeaguePlayerStats(db, league);
+        await syncLeaguePlayerStats(db, league, API_CONFIG[league]);
       } catch (leagueError) {
         logger.error(`Error syncing ${league} player stats:`, leagueError);
         // Continue with other leagues even if one fails
@@ -160,10 +184,61 @@ async function syncPlayerStats() {
  * Synchronize player statistics for a specific league
  * @param {Object} db - MongoDB database instance
  * @param {string} league - League identifier
+ * @param {Object} config - API configuration for the league
  */
-async function syncLeaguePlayerStats(db, league) {
+async function syncLeaguePlayerStats(db, league, config) {
   try {
     logger.info(`Starting player stats synchronization for ${league}`);
+    
+    // Calculate date range (default to yesterday)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const formattedDate = yesterday.toISOString().split('T')[0]; // YYYY-MM-DD format
+    
+    // Set up API request parameters based on league
+    let endpoint = config.statsEndpoint;
+    let params = {};
+    
+    // League-specific parameter adjustments
+    if (league === 'NFL') {
+      // NFL uses week-based stats instead of date
+      const currentSeason = getCurrentNFLSeason();
+      const currentWeek = calculateNFLWeek();
+      params = {
+        season: currentSeason,
+        week: currentWeek
+      };
+    } else if (['PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'].includes(league)) {
+      // Soccer leagues need competition ID
+      params = {
+        date: formattedDate,
+        competition: config.competitionId
+      };
+    } else {
+      // Standard date-based parameters for NBA, MLB, NHL
+      params = {
+        date: formattedDate
+      };
+    }
+    
+    logger.info(`Requesting ${league} player stats with params:`, params);
+    
+    // Make API request
+    const response = await axios.get(`${config.url}${endpoint}`, {
+      params,
+      headers: {
+        'Ocp-Apim-Subscription-Key': config.key
+      },
+      timeout: 30000 // 30 second timeout
+    });
+    
+    if (!response.data || !Array.isArray(response.data)) {
+      logger.warn(`No ${league} player stats returned from API. Response:`, response.data);
+      return;
+    }
+    
+    // Process player stats
+    const playerStats = transformPlayerStats(response.data, league, formattedDate);
     
     // Get collection name for this league
     const collectionName = `${league.toLowerCase()}_player_stats`;
@@ -171,61 +246,28 @@ async function syncLeaguePlayerStats(db, league) {
     // Ensure collection exists with proper indexes
     await ensureCollectionExists(db, collectionName);
     
-    // Get recent games for the league (to fetch player stats from)
-    const recentGames = await fetchRecentGames(league);
-    logger.info(`Found ${recentGames.length} recent games for ${league}`);
+    // Insert/update player stats
+    let updatedCount = 0;
+    let insertedCount = 0;
     
-    let totalPlayersProcessed = 0;
-    
-    // Process each game's player stats
-    for (const game of recentGames) {
-      try {
-        // Fetch player statistics for this game
-        const playerStats = await fetchGamePlayerStats(league, game.idEvent);
-        
-        if (playerStats.length === 0) {
-          logger.debug(`No player stats found for game ${game.idEvent}`);
-          continue;
-        }
-        
-        // Transform and save each player's stats
-        let updatedCount = 0;
-        let insertedCount = 0;
-        
-        for (const stat of playerStats) {
-          const transformedStat = transformPlayerStat(stat, league, game);
-          
-          // Skip invalid stats
-          if (!transformedStat.playerId || !transformedStat.gameId) {
-            continue;
-          }
-          
-          // Update or insert player stat
-          const result = await db.collection(collectionName).updateOne(
-            { 
-              playerId: transformedStat.playerId,
-              gameId: transformedStat.gameId
-            },
-            { $set: transformedStat },
-            { upsert: true }
-          );
-          
-          if (result.matchedCount > 0) {
-            updatedCount++;
-          } else if (result.upsertedCount > 0) {
-            insertedCount++;
-          }
-        }
-        
-        totalPlayersProcessed += insertedCount + updatedCount;
-        logger.debug(`Processed ${insertedCount + updatedCount} player stats for game ${game.idEvent}`);
-        
-      } catch (gameError) {
-        logger.error(`Error processing player stats for game ${game.idEvent}:`, gameError);
+    for (const stat of playerStats) {
+      const result = await db.collection(collectionName).updateOne(
+        { 
+          playerId: stat.playerId,
+          gameId: stat.gameId
+        },
+        { $set: stat },
+        { upsert: true }
+      );
+      
+      if (result.matchedCount > 0) {
+        updatedCount++;
+      } else if (result.upsertedCount > 0) {
+        insertedCount++;
       }
     }
     
-    logger.info(`${league} player stats sync completed: ${totalPlayersProcessed} players processed`);
+    logger.info(`${league} player stats sync completed: ${insertedCount} inserted, ${updatedCount} updated`);
     
   } catch (error) {
     logger.error(`Error syncing ${league} player stats:`, error);
@@ -266,366 +308,227 @@ async function ensureCollectionExists(db, collectionName) {
 }
 
 /**
- * Fetch recent games for a league
+ * Transform API player stats to our schema format
+ * @param {Array} apiStats - Stats from API
  * @param {string} league - League identifier
- * @returns {Promise<Array>} Recent completed games
+ * @param {string} gameDate - Game date string
+ * @returns {Array} Transformed player stats
  */
-async function fetchRecentGames(league) {
-  try {
-    const leagueId = LEAGUE_IDS[league];
+function transformPlayerStats(apiStats, league, gameDate) {
+  return apiStats.map(stat => {
+    // Base player stat object
+    const basePlayerStat = {
+      playerId: stat.PlayerID || stat.PlayerId || stat.playerId || '',
+      playerName: stat.Name || stat.PlayerName || stat.name || '',
+      teamId: stat.TeamID || stat.TeamId || stat.teamId || '',
+      teamName: stat.Team || stat.TeamName || stat.team || '',
+      gameId: stat.GameID || stat.GameId || stat.gameId || '',
+      date: new Date(gameDate),
+      league: league,
+      season: getCurrentSeason(league),
+      minutesPlayed: stat.Minutes || stat.MinutesPlayed || 0,
+      isStarter: stat.IsStarting || stat.Starter || stat.isStarter || false,
+      stats: {},
+      advancedMetrics: {},
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
     
-    // Using eventspastleague endpoint to get recent completed games (last 15)
-    const url = `${SPORTSDB_BASE_URL}/${SPORTSDB_API_KEY}/eventspastleague/${leagueId}/15`;
-    
-    logger.debug(`Requesting recent games from: ${url}`);
-    
-    const response = await axios.get(url, { timeout: API_TIMEOUT });
-    
-    if (!response.data || !response.data.events || !Array.isArray(response.data.events)) {
-      logger.warn(`No ${league} recent games returned from TheSportsDB`);
-      return [];
-    }
-    
-    // Filter to get only finished games
-    return response.data.events.filter(game => 
-      game.strStatus === 'Match Finished' || 
-      game.strStatus === 'Finished' || 
-      game.strStatus === 'FT'
-    );
-  } catch (error) {
-    logger.error(`Error fetching recent games for ${league}:`, error);
-    return [];
-  }
-}
-
-/**
- * Fetch player statistics for a specific game
- * @param {string} league - League identifier
- * @param {string} gameId - Game ID
- * @returns {Promise<Array>} Player statistics
- */
-async function fetchGamePlayerStats(league, gameId) {
-  try {
-    // Using eventstatistics endpoint to get player stats for a game
-    const url = `${SPORTSDB_BASE_URL}/${SPORTSDB_API_KEY}/eventstatistics/${gameId}`;
-    
-    logger.debug(`Requesting player stats for game ${gameId} from: ${url}`);
-    
-    const response = await axios.get(url, { timeout: API_TIMEOUT });
-    
-    // Check if we have valid player stats
-    if (!response.data || !response.data.statistics) {
-      return [];
-    }
-    
-    // Extract player stats based on sport
-    const sport = SPORTS_MAPPING[league];
-    
-    // Handle different sport structures in the API response
-    switch (sport) {
-      case 'soccer':
-        return processPlayerStats_Soccer(response.data.statistics);
-      case 'basketball':
-        return processPlayerStats_Basketball(response.data.statistics);
-      case 'american_football':
-        return processPlayerStats_Football(response.data.statistics);
-      case 'baseball':
-        return processPlayerStats_Baseball(response.data.statistics);
-      case 'ice_hockey':
-        return processPlayerStats_Hockey(response.data.statistics);
+    // Add sport-specific stats
+    switch(league) {
+      case 'NBA':
+        basePlayerStat.stats = extractBasketballStats(stat);
+        break;
+      case 'NFL':
+        basePlayerStat.stats = extractFootballStats(stat);
+        break;
+      case 'MLB':
+        basePlayerStat.stats = extractBaseballStats(stat);
+        break;
+      case 'NHL':
+        basePlayerStat.stats = extractHockeyStats(stat);
+        break;
+      case 'PREMIER_LEAGUE':
+      case 'LA_LIGA':
+      case 'BUNDESLIGA':
+      case 'SERIE_A':
+        basePlayerStat.stats = extractSoccerStats(stat);
+        break;
       default:
-        return [];
+        // Generic stats extraction
+        basePlayerStat.stats = extractGenericStats(stat);
     }
-  } catch (error) {
-    logger.error(`Error fetching player stats for game ${gameId}:`, error);
-    return [];
-  }
+    
+    return basePlayerStat;
+  });
 }
 
 /**
- * Process soccer player statistics
- * @param {Object} statsData - Raw statistics data
- * @returns {Array} Processed player statistics
+ * Extract basketball-specific stats from API response
+ * @param {Object} stat - API stat object
+ * @returns {Object} Basketball stats
  */
-function processPlayerStats_Soccer(statsData) {
-  const playerStats = [];
-  
-  // Process home team players
-  if (statsData.home && Array.isArray(statsData.home.players)) {
-    statsData.home.players.forEach(player => {
-      player.teamId = statsData.home.teamid;
-      player.teamName = statsData.home.strTeam;
-      player.isHomeTeam = true;
-      playerStats.push(player);
-    });
-  }
-  
-  // Process away team players
-  if (statsData.away && Array.isArray(statsData.away.players)) {
-    statsData.away.players.forEach(player => {
-      player.teamId = statsData.away.teamid;
-      player.teamName = statsData.away.strTeam;
-      player.isHomeTeam = false;
-      playerStats.push(player);
-    });
-  }
-  
-  return playerStats;
-}
-
-/**
- * Process basketball player statistics
- * @param {Object} statsData - Raw statistics data
- * @returns {Array} Processed player statistics
- */
-function processPlayerStats_Basketball(statsData) {
-  // Similar structure to soccer in TheSportsDB
-  return processPlayerStats_Soccer(statsData);
-}
-
-/**
- * Process football player statistics
- * @param {Object} statsData - Raw statistics data
- * @returns {Array} Processed player statistics
- */
-function processPlayerStats_Football(statsData) {
-  // Similar structure to soccer in TheSportsDB
-  return processPlayerStats_Soccer(statsData);
-}
-
-/**
- * Process baseball player statistics
- * @param {Object} statsData - Raw statistics data
- * @returns {Array} Processed player statistics
- */
-function processPlayerStats_Baseball(statsData) {
-  // Similar structure to soccer in TheSportsDB
-  return processPlayerStats_Soccer(statsData);
-}
-
-/**
- * Process hockey player statistics
- * @param {Object} statsData - Raw statistics data
- * @returns {Array} Processed player statistics
- */
-function processPlayerStats_Hockey(statsData) {
-  // Similar structure to soccer in TheSportsDB
-  return processPlayerStats_Soccer(statsData);
-}
-
-/**
- * Transform API player stat to our schema format
- * @param {Object} stat - Player stat from API
- * @param {string} league - League identifier
- * @param {Object} game - Game object
- * @returns {Object} Transformed player stat
- */
-function transformPlayerStat(stat, league, game) {
-  // Base player stat object
-  const basePlayerStat = {
-    playerId: stat.idPlayer,
-    playerName: stat.strPlayer,
-    teamId: stat.teamId,
-    teamName: stat.teamName,
-    gameId: game.idEvent,
-    date: new Date(game.dateEvent),
-    league: league,
-    season: getCurrentSeason(league),
-    isHomeTeam: stat.isHomeTeam,
-    isStarter: stat.strPosition === 'Starter' || stat.intPosition <= 11, // Basic assumption
-    minutesPlayed: extractMinutesPlayed(stat),
-    stats: extractSportSpecificStats(stat, league),
-    createdAt: new Date(),
-    updatedAt: new Date()
-  };
-  
-  return basePlayerStat;
-}
-
-/**
- * Extract minutes played from player stat
- * @param {Object} stat - Player stat
- * @returns {number} Minutes played
- */
-function extractMinutesPlayed(stat) {
-  // Different sports/leagues might store this differently
-  if (stat.intMinutes) {
-    return parseInt(stat.intMinutes);
-  } else if (stat.strMinutes) {
-    // Parse minutes from string format (e.g., "90:00")
-    const minutesStr = stat.strMinutes.split(':')[0];
-    return parseInt(minutesStr) || 0;
-  }
-  
-  return 0;
-}
-
-/**
- * Extract sport-specific stats from player stat
- * @param {Object} stat - Player stat
- * @param {string} league - League identifier
- * @returns {Object} Sport-specific stats
- */
-function extractSportSpecificStats(stat, league) {
-  switch(league) {
-    case 'NBA':
-      return extractBasketballPlayerStats(stat);
-    case 'NFL':
-      return extractFootballPlayerStats(stat);
-    case 'MLB':
-      return extractBaseballPlayerStats(stat);
-    case 'NHL':
-      return extractHockeyPlayerStats(stat);
-    case 'PREMIER_LEAGUE':
-    case 'LA_LIGA':
-    case 'BUNDESLIGA':
-    case 'SERIE_A':
-      return extractSoccerPlayerStats(stat);
-    default:
-      return extractGenericPlayerStats(stat);
-  }
-}
-
-/**
- * Extract basketball-specific stats from player stat
- * @param {Object} stat - Player stat
- * @returns {Object} Basketball-specific stats
- */
-function extractBasketballPlayerStats(stat) {
+function extractBasketballStats(stat) {
   return {
-    points: parseInt(stat.intPoints) || 0,
-    assists: parseInt(stat.intAssists) || 0,
-    rebounds: parseInt(stat.intRebounds) || 0,
-    steals: parseInt(stat.intSteals) || 0,
-    blocks: parseInt(stat.intBlocks) || 0,
-    turnovers: parseInt(stat.intTurnovers) || 0,
-    fouls: parseInt(stat.intFouls) || 0,
-    fieldGoalsMade: parseInt(stat.intFieldGoalsMade) || 0,
-    fieldGoalsAttempted: parseInt(stat.intFieldGoalsAttempted) || 0,
-    threePointersMade: parseInt(stat.intThreePointersMade) || 0,
-    threePointersAttempted: parseInt(stat.intThreePointersAttempted) || 0,
-    freeThrowsMade: parseInt(stat.intFreeThrowsMade) || 0,
-    freeThrowsAttempted: parseInt(stat.intFreeThrowsAttempted) || 0,
-    plusMinus: parseInt(stat.intPlusMinus) || 0
+    points: stat.Points || 0,
+    rebounds: (stat.Rebounds || stat.TotalRebounds || 0),
+    assists: stat.Assists || 0,
+    steals: stat.Steals || 0,
+    blocks: stat.BlockedShots || stat.Blocks || 0,
+    turnovers: stat.Turnovers || 0,
+    fieldGoalsMade: stat.FieldGoalsMade || 0,
+    fieldGoalsAttempted: stat.FieldGoalsAttempted || 0,
+    threePointersMade: stat.ThreePointersMade || 0,
+    threePointersAttempted: stat.ThreePointersAttempted || 0,
+    freeThrowsMade: stat.FreeThrowsMade || 0,
+    freeThrowsAttempted: stat.FreeThrowsAttempted || 0,
+    personalFouls: stat.PersonalFouls || 0,
+    plusMinus: stat.PlusMinus || 0,
+    offensiveRebounds: stat.OffensiveRebounds || 0,
+    defensiveRebounds: stat.DefensiveRebounds || 0
   };
 }
 
 /**
- * Extract football-specific stats from player stat
- * @param {Object} stat - Player stat
- * @returns {Object} Football-specific stats
+ * Extract football-specific stats from API response
+ * @param {Object} stat - API stat object
+ * @returns {Object} Football stats
  */
-function extractFootballPlayerStats(stat) {
+function extractFootballStats(stat) {
   return {
-    passingYards: parseInt(stat.intPassingYards) || 0,
-    passingTouchdowns: parseInt(stat.intPassingTouchdowns) || 0,
-    passingCompletions: parseInt(stat.intPassingCompletions) || 0,
-    passingAttempts: parseInt(stat.intPassingAttempts) || 0,
-    passingInterceptions: parseInt(stat.intPassingInterceptions) || 0,
-    rushingYards: parseInt(stat.intRushingYards) || 0,
-    rushingTouchdowns: parseInt(stat.intRushingTouchdowns) || 0,
-    rushingAttempts: parseInt(stat.intRushingAttempts) || 0,
-    receivingYards: parseInt(stat.intReceivingYards) || 0,
-    receivingTouchdowns: parseInt(stat.intReceivingTouchdowns) || 0,
-    receptions: parseInt(stat.intReceptions) || 0,
-    tackles: parseInt(stat.intTackles) || 0,
-    sacks: parseInt(stat.intSacks) || 0,
-    interceptions: parseInt(stat.intInterceptions) || 0,
-    fumbles: parseInt(stat.intFumbles) || 0,
-    fumblesRecovered: parseInt(stat.intFumblesRecovered) || 0
+    passingYards: stat.PassingYards || 0,
+    passingTouchdowns: stat.PassingTouchdowns || 0,
+    passingCompletions: stat.PassingCompletions || 0,
+    passingAttempts: stat.PassingAttempts || 0,
+    passingInterceptions: stat.PassingInterceptions || 0,
+    rushingYards: stat.RushingYards || 0,
+    rushingTouchdowns: stat.RushingTouchdowns || 0,
+    rushingAttempts: stat.RushingAttempts || 0,
+    receivingYards: stat.ReceivingYards || 0,
+    receivingTouchdowns: stat.ReceivingTouchdowns || 0,
+    receptions: stat.Receptions || 0,
+    targets: stat.Targets || 0,
+    fumbles: stat.Fumbles || 0,
+    fumblesLost: stat.FumblesLost || 0,
+    tacklesSolo: stat.TacklesSolo || 0,
+    tacklesAssisted: stat.TacklesAssisted || 0,
+    tacklesForLoss: stat.TacklesForLoss || 0,
+    sacks: stat.Sacks || 0,
+    interceptions: stat.Interceptions || 0,
+    interceptionReturnYards: stat.InterceptionReturnYards || 0,
+    interceptionReturnTouchdowns: stat.InterceptionReturnTouchdowns || 0
   };
 }
 
 /**
- * Extract baseball-specific stats from player stat
- * @param {Object} stat - Player stat
- * @returns {Object} Baseball-specific stats
+ * Extract baseball-specific stats from API response
+ * @param {Object} stat - API stat object
+ * @returns {Object} Baseball stats
  */
-function extractBaseballPlayerStats(stat) {
+function extractBaseballStats(stat) {
   return {
-    atBats: parseInt(stat.intAtBats) || 0,
-    runs: parseInt(stat.intRuns) || 0,
-    hits: parseInt(stat.intHits) || 0,
-    doubles: parseInt(stat.intDoubles) || 0,
-    triples: parseInt(stat.intTriples) || 0,
-    homeRuns: parseInt(stat.intHomeRuns) || 0,
-    runsBattedIn: parseInt(stat.intRunsBattedIn) || 0,
-    walks: parseInt(stat.intWalks) || 0,
-    strikeouts: parseInt(stat.intStrikeouts) || 0,
-    stolenBases: parseInt(stat.intStolenBases) || 0,
-    inningsPitched: parseFloat(stat.strInningsPitched) || 0,
-    pitchingHits: parseInt(stat.intPitchingHits) || 0,
-    pitchingRuns: parseInt(stat.intPitchingRuns) || 0,
-    earnedRuns: parseInt(stat.intEarnedRuns) || 0,
-    pitchingWalks: parseInt(stat.intPitchingWalks) || 0,
-    pitchingStrikeouts: parseInt(stat.intPitchingStrikeouts) || 0,
-    pitchingHomeRuns: parseInt(stat.intPitchingHomeRuns) || 0
+    atBats: stat.AtBats || 0,
+    runs: stat.Runs || 0,
+    hits: stat.Hits || 0,
+    doubles: stat.Doubles || 0,
+    triples: stat.Triples || 0,
+    homeRuns: stat.HomeRuns || 0,
+    runsBattedIn: stat.RunsBattedIn || 0,
+    battingAverage: stat.BattingAverage || 0,
+    stolenBases: stat.StolenBases || 0,
+    caughtStealing: stat.CaughtStealing || 0,
+    strikeouts: stat.Strikeouts || 0,
+    walks: stat.Walks || 0,
+    hitByPitch: stat.HitByPitch || 0,
+    sacrifices: stat.Sacrifices || 0,
+    onBasePercentage: stat.OnBasePercentage || 0,
+    sluggingPercentage: stat.SluggingPercentage || 0,
+    onBasePlusSlugging: stat.OnBasePlusSlugging || 0,
+    inningsPitched: stat.InningsPitched || 0,
+    pitchingHits: stat.PitchingHits || 0,
+    pitchingRuns: stat.PitchingRuns || 0,
+    pitchingEarnedRuns: stat.PitchingEarnedRuns || 0,
+    pitchingWalks: stat.PitchingWalks || 0,
+    pitchingStrikeouts: stat.PitchingStrikeouts || 0,
+    pitchingHomeRuns: stat.PitchingHomeRuns || 0,
+    earnedRunAverage: stat.EarnedRunAverage || 0,
+    wins: stat.Wins || 0,
+    losses: stat.Losses || 0,
+    saves: stat.Saves || 0
   };
 }
 
 /**
- * Extract hockey-specific stats from player stat
- * @param {Object} stat - Player stat
- * @returns {Object} Hockey-specific stats
+ * Extract hockey-specific stats from API response
+ * @param {Object} stat - API stat object
+ * @returns {Object} Hockey stats
  */
-function extractHockeyPlayerStats(stat) {
+function extractHockeyStats(stat) {
   return {
-    goals: parseInt(stat.intGoals) || 0,
-    assists: parseInt(stat.intAssists) || 0,
-    points: parseInt(stat.intPoints) || 0,
-    plusMinus: parseInt(stat.intPlusMinus) || 0,
-    penaltyMinutes: parseInt(stat.intPenaltyMinutes) || 0,
-    shots: parseInt(stat.intShots) || 0,
-    hits: parseInt(stat.intHits) || 0,
-    blocks: parseInt(stat.intBlocks) || 0,
-    faceoffWins: parseInt(stat.intFaceoffWins) || 0,
-    faceoffsTaken: parseInt(stat.intFaceoffsTaken) || 0,
-    saves: parseInt(stat.intSaves) || 0,
-    goalsAgainst: parseInt(stat.intGoalsAgainst) || 0,
-    shotsFaced: parseInt(stat.intShotsFaced) || 0
+    goals: stat.Goals || 0,
+    assists: stat.Assists || 0,
+    points: stat.Points || 0,
+    plusMinus: stat.PlusMinus || 0,
+    penaltyMinutes: stat.PenaltyMinutes || 0,
+    powerPlayGoals: stat.PowerPlayGoals || 0,
+    powerPlayAssists: stat.PowerPlayAssists || 0,
+    shortHandedGoals: stat.ShortHandedGoals || 0,
+    shortHandedAssists: stat.ShortHandedAssists || 0,
+    gameWinningGoals: stat.GameWinningGoals || 0,
+    shots: stat.Shots || 0,
+    blockedShots: stat.BlockedShots || 0,
+    hits: stat.Hits || 0,
+    faceoffs: stat.Faceoffs || 0,
+    faceoffWins: stat.FaceoffWins || 0,
+    takeaways: stat.Takeaways || 0,
+    giveaways: stat.Giveaways || 0,
+    saves: stat.Saves || 0,
+    goalsAgainst: stat.GoalsAgainst || 0,
+    savePercentage: stat.SavePercentage || 0,
+    shutouts: stat.Shutouts || 0
   };
 }
 
 /**
- * Extract soccer-specific stats from player stat
- * @param {Object} stat - Player stat
- * @returns {Object} Soccer-specific stats
+ * Extract soccer-specific stats from API response
+ * @param {Object} stat - API stat object
+ * @returns {Object} Soccer stats
  */
-function extractSoccerPlayerStats(stat) {
+function extractSoccerStats(stat) {
   return {
-    goals: parseInt(stat.intGoals) || 0,
-    assists: parseInt(stat.intAssists) || 0,
-    yellowCards: parseInt(stat.intYellowCards) || 0,
-    redCards: parseInt(stat.intRedCards) || 0,
-    shots: parseInt(stat.intShots) || 0,
-    shotsOnTarget: parseInt(stat.intShotsOnTarget) || 0,
-    passes: parseInt(stat.intPasses) || 0,
-    tackles: parseInt(stat.intTackles) || 0,
-    blocks: parseInt(stat.intBlocks) || 0,
-    interceptions: parseInt(stat.intInterceptions) || 0,
-    fouls: parseInt(stat.intFouls) || 0,
-    fouled: parseInt(stat.intFouled) || 0,
-    offsides: parseInt(stat.intOffsides) || 0,
-    saves: parseInt(stat.intSaves) || 0,
-    conceded: parseInt(stat.intConceded) || 0
+    goals: stat.Goals || 0,
+    assists: stat.Assists || 0,
+    shots: stat.Shots || 0,
+    shotsOnGoal: stat.ShotsOnGoal || 0,
+    yellowCards: stat.YellowCards || 0,
+    redCards: stat.RedCards || 0,
+    passingAccuracy: stat.PassingAccuracy || 0,
+    passes: stat.Passes || 0,
+    passesCompleted: stat.PassesCompleted || 0,
+    tackles: stat.Tackles || 0,
+    interceptions: stat.Interceptions || 0,
+    foulsCommitted: stat.FoulsCommitted || 0,
+    foulsDrawn: stat.FoulsDrawn || 0,
+    saves: stat.Saves || 0,
+    cleanSheets: stat.CleanSheets || 0,
+    penaltiesSaved: stat.PenaltiesSaved || 0,
+    penaltiesAllowed: stat.PenaltiesAllowed || 0,
+    minutesPlayed: stat.MinutesPlayed || 0
   };
 }
 
 /**
- * Extract generic stats from player stat
- * @param {Object} stat - Player stat
+ * Extract generic stats for any sport
+ * @param {Object} stat - API stat object
  * @returns {Object} Generic stats
  */
-function extractGenericPlayerStats(stat) {
+function extractGenericStats(stat) {
+  // Create a generic stats object from all numeric properties
   const genericStats = {};
   
-  // Loop through all properties and extract numeric values
   for (const [key, value] of Object.entries(stat)) {
-    if (key.startsWith('int') && !isNaN(parseInt(value))) {
-      // Convert intPropertyName to propertyName
-      const statName = key.replace('int', '');
-      const camelCaseName = statName.charAt(0).toLowerCase() + statName.slice(1);
-      genericStats[camelCaseName] = parseInt(value) || 0;
+    if (typeof value === 'number' && !['id', 'playerId', 'teamId', 'gameId'].includes(key.toLowerCase())) {
+      genericStats[key] = value;
     }
   }
   
@@ -633,44 +536,77 @@ function extractGenericPlayerStats(stat) {
 }
 
 /**
- * Get current season based on league and date
+ * Get current season for a league
  * @param {string} league - League identifier
- * @returns {string} Current season (e.g., '2023' or '2023-2024')
+ * @returns {string} Current season identifier
  */
-function getCurrentSeason(league) {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth() + 1; // 1-12
+function getCurrentSeason(league = '') {
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1; // 1-12
   
-  // Soccer leagues typically run across two years (e.g., 2023-2024)
-  if (['PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'].includes(league)) {
-    if (month >= 7) { // After July (new season starts)
-      return `${year}-${year + 1}`;
-    }
-    return `${year - 1}-${year}`;
+  // League-specific season logic
+  switch(league.toUpperCase()) {
+    case 'NFL':
+      // NFL season spans Aug/Sept to Feb
+      return currentMonth >= 8 ? `${currentYear}` : `${currentYear - 1}`;
+      
+    case 'NBA':
+    case 'NHL':
+      // NBA/NHL seasons span Oct to June
+      return currentMonth >= 10 ? `${currentYear}-${currentYear + 1}` : `${currentYear - 1}-${currentYear}`;
+      
+    case 'MLB':
+      // MLB season spans March/April to Oct/Nov
+      return currentMonth >= 3 && currentMonth <= 11 ? `${currentYear}` : (currentMonth < 3 ? `${currentYear}` : `${currentYear}`);
+      
+    case 'PREMIER_LEAGUE':
+    case 'LA_LIGA':
+    case 'BUNDESLIGA':
+    case 'SERIE_A':
+      // European soccer seasons span Aug/Sept to May
+      return currentMonth >= 8 ? `${currentYear}-${currentYear + 1}` : `${currentYear - 1}-${currentYear}`;
+      
+    default:
+      return `${currentYear}`;
+  }
+}
+
+/**
+ * Get current NFL season
+ * @returns {string} Current NFL season year
+ */
+function getCurrentNFLSeason() {
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1; // 1-12
+  
+  // NFL season spans Aug/Sept to Feb
+  return currentMonth >= 8 ? `${currentYear}` : `${currentYear - 1}`;
+}
+
+/**
+ * Calculate current NFL week
+ * @returns {number} Current NFL week
+ */
+function calculateNFLWeek() {
+  // A simple estimation - in production, you would fetch this from a sports data API
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const seasonStartDate = new Date(currentYear, 8, 1); // Sept 1 (approximate)
+  
+  // If before season start, return week 1
+  if (currentDate < seasonStartDate) {
+    return 1;
   }
   
-  // NBA and NHL seasons span October to June
-  if (['NBA', 'NHL'].includes(league)) {
-    if (month >= 10 || month <= 6) { // October to June
-      return month >= 10 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
-    }
-  }
+  // Calculate weeks since season start
+  const diffTime = Math.abs(currentDate - seasonStartDate);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const week = Math.floor(diffDays / 7) + 1;
   
-  // NFL season spans September to February
-  if (league === 'NFL') {
-    if (month >= 9 || month <= 2) { // September to February
-      return month >= 9 ? `${year}` : `${year - 1}`;
-    }
-  }
-  
-  // MLB season typically runs within a single calendar year
-  if (league === 'MLB') {
-    return `${year}`;
-  }
-  
-  // Default to current year
-  return `${year}`;
+  // Cap at week 17 (regular season)
+  return Math.min(week, 17);
 }
 
 /**

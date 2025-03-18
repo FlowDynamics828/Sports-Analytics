@@ -6,6 +6,7 @@ require('dotenv').config();
 // Import required modules
 const Redis = require('ioredis');
 const winston = require('winston');
+const rateLimit = require('express-rate-limit');
 
 // Configure Winston logger to match .env settings
 const logger = winston.createLogger({
@@ -262,3 +263,11 @@ class RateLimiter {
 // Create and export singleton instance
 const rateLimiter = new RateLimiter();
 module.exports = rateLimiter;
+
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests, please try again later.'
+});
+
+module.exports = limiter;

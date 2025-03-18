@@ -36,6 +36,22 @@ class NotificationManager extends EventEmitter {
         return this.notifications.filter(n => 
             n.userId === userId && !n.read);
     }
+
+    addNotification(notification) {
+        this.notifications.push(notification);
+        this.emit('notificationAdded', notification);
+        logger.info('Notification added:', notification);
+    }
+
+    removeNotification(id) {
+        this.notifications = this.notifications.filter(n => n.id !== id);
+        this.emit('notificationRemoved', id);
+        logger.info('Notification removed:', id);
+    }
+
+    getNotifications() {
+        return this.notifications;
+    }
 }
 
 module.exports = new NotificationManager();

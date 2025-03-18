@@ -50,7 +50,11 @@ async function main() {
   // 8. Check file permissions
   checkFilePermissions();
   
-  // 9. Print summary
+  // 9. Check and install missing Node.js modules
+  console.log(`\nChecking and installing missing Node.js modules:`);
+  await checkAndInstallModules();
+  
+  // 10. Print summary
   printSummary();
 }
 
@@ -142,7 +146,6 @@ async function checkRedisConnection() {
   const redisPort = parseInt(process.env.REDIS_PORT, 10) || 6379;
   
   try {
-    // Check if Redis is running
     const isRunning = await checkPortOpen(redisHost, redisPort);
     
     if (isRunning) {
@@ -150,7 +153,6 @@ async function checkRedisConnection() {
     } else {
       console.log(`${colors.yellow}⚠ Redis is not running on ${redisHost}:${redisPort}${colors.reset}`);
       
-      // Check if in-memory cache is enabled
       if (process.env.USE_IN_MEMORY_CACHE === 'true') {
         console.log(`${colors.green}✓ In-memory cache fallback is enabled${colors.reset}`);
       } else {
@@ -172,43 +174,90 @@ async function checkRedisConnection() {
 async function checkMongoDBConnection() {
   console.log(`${colors.bright}Checking MongoDB connection...${colors.reset}`);
   
-  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics';
+  // Get MongoDB URI from environment, with fallback
+  const mongoUri = process.env.MONGODB_URI || 'mongodb+srv://SportAnalytics:Studyhard%402034@cluster0.et16d.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
+  
+  if (!mongoUri) {
+    console.log(`${colors.red}✗ MONGODB_URI environment variable is not set${colors.reset}`);
+    overallStatus = false;
+    return;
+  }
   
   try {
-    // Extract host and port from URI
-    let matches;
-    
-    try {
-      matches = mongoUri.match(/mongodb(?:\+srv)?:\/\/([^:]+)(?::(\d+))?/);
-    } catch (e) {
-      console.log(`${colors.yellow}⚠ Could not parse MongoDB URI: ${mongoUri}${colors.reset}`);
-      console.log(`${colors.yellow}ℹ Skipping MongoDB connection check${colors.reset}`);
-      return;
-    }
-    
-    if (matches) {
-      const host = matches[1];
-      const port = parseInt(matches[2], 10) || 27017;
+    // For Atlas connections, we need to check differently than just a port check
+    if (mongoUri.includes('mongodb+srv')) {
+      console.log(`Detected MongoDB Atlas connection string`);
       
-      // For MongoDB+srv, we can't directly check connection
-      if (mongoUri.includes('mongodb+srv')) {
-        console.log(`${colors.yellow}⚠ MongoDB+srv protocol detected, can't directly check connection${colors.reset}`);
-        console.log(`${colors.yellow}ℹ Skipping MongoDB connection check${colors.reset}`);
-        return;
+      // Try to require mongodb - we'll need this to test the connection
+      let MongoClient;
+      try {
+        const mongodb = require('mongodb');
+        MongoClient = mongodb.MongoClient;
+      } catch (moduleError) {
+        console.log(`${colors.yellow}⚠ mongodb module not found, installing...${colors.reset}`);
+        try {
+          execSync('npm install mongodb', { stdio: 'pipe' });
+          const mongodb = require('mongodb');
+          MongoClient = mongodb.MongoClient;
+          console.log(`${colors.green}✓ mongodb module installed successfully${colors.reset}`);
+        } catch (installError) {
+          console.log(`${colors.red}✗ Could not install mongodb module: ${installError.message}${colors.reset}`);
+          console.log(`${colors.red}✗ Cannot verify MongoDB Atlas connection${colors.reset}`);
+          overallStatus = false;
+          return;
+        }
       }
       
-      // Check if MongoDB is running
-      const isRunning = await checkPortOpen(host, port);
+      // Extract hostname for display purposes
+      let hostname = "unknown";
+      try {
+        // Parse just the hostname part
+        const match = mongoUri.match(/@([^\/\?]+)/);
+        if (match && match[1]) {
+          hostname = match[1];
+        }
+      } catch (parseError) {
+        hostname = "unknown-host";
+      }
       
-      if (isRunning) {
-        console.log(`${colors.green}✓ MongoDB is running on ${host}:${port}${colors.reset}`);
-      } else {
-        console.log(`${colors.red}✗ MongoDB is not running on ${host}:${port}${colors.reset}`);
+      // Try to connect to MongoDB
+      try {
+        const client = new MongoClient(mongoUri, {
+          connectTimeoutMS: 5000,
+          serverSelectionTimeoutMS: 5000
+        });
+        
+        await client.connect();
+        await client.db().command({ ping: 1 });
+        await client.close();
+        
+        console.log(`${colors.green}✓ Successfully connected to MongoDB Atlas at ${hostname}${colors.reset}`);
+      } catch (connectionError) {
+        console.log(`${colors.red}✗ MongoDB is not accessible at ${hostname}${colors.reset}`);
+        console.log(`${colors.red}✗ Error: ${connectionError.message}${colors.reset}`);
+        console.log(`${colors.yellow}ℹ Check your network connection and MongoDB Atlas status${colors.reset}`);
+        console.log(`${colors.yellow}ℹ Verify the connection string in your .env file${colors.reset}`);
         overallStatus = false;
       }
     } else {
-      console.log(`${colors.yellow}⚠ Could not parse MongoDB URI: ${mongoUri}${colors.reset}`);
-      console.log(`${colors.yellow}ℹ Skipping MongoDB connection check${colors.reset}`);
+      // Standard MongoDB connection - parse URL and check port
+      try {
+        const url = new URL(mongoUri);
+        const host = url.hostname;
+        const port = parseInt(url.port, 10) || 27017;
+        
+        const isRunning = await checkPortOpen(host, port);
+        
+        if (isRunning) {
+          console.log(`${colors.green}✓ MongoDB is running on ${host}:${port}${colors.reset}`);
+        } else {
+          console.log(`${colors.red}✗ MongoDB is not running on ${host}:${port}${colors.reset}`);
+          overallStatus = false;
+        }
+      } catch (error) {
+        console.log(`${colors.yellow}⚠ Could not parse MongoDB URI: ${mongoUri}${colors.reset}`);
+        console.log(`${colors.yellow}ℹ Skipping MongoDB connection check${colors.reset}`);
+      }
     }
   } catch (error) {
     console.log(`${colors.red}✗ MongoDB check failed: ${error.message}${colors.reset}`);
@@ -378,6 +427,26 @@ function checkFilePermissions() {
   console.log(`${colors.green}✓ All file permissions are correct${colors.reset}`);
   
   console.log();
+}
+
+// Function to check and install missing Node.js modules
+async function checkAndInstallModules() {
+  const requiredModules = ['@opentelemetry/exporter-trace-otlp-http'];
+  for (const module of requiredModules) {
+    try {
+      require.resolve(module);
+      console.log(`${colors.green}✓ Module ${module} is installed${colors.reset}`);
+    } catch (e) {
+      console.log(`${colors.yellow}⚠ Module ${module} is missing. Installing...${colors.reset}`);
+      try {
+        execSync(`npm install ${module}`, { stdio: 'inherit' });
+        console.log(`${colors.green}✓ Module ${module} installed successfully${colors.reset}`);
+      } catch (installError) {
+        console.log(`${colors.red}✗ Failed to install module ${module}: ${installError.message}${colors.reset}`);
+        overallStatus = false;
+      }
+    }
+  }
 }
 
 // Function to print summary

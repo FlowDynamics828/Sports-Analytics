@@ -1,4 +1,4 @@
-const EventEmitter = require('events');
+const { EventEmitter } = require('events');
 const logger = require('./logger');
 
 class TaskManager extends EventEmitter {
@@ -8,13 +8,22 @@ class TaskManager extends EventEmitter {
     this.running = false;
   }
 
-  async addTask(taskId, task) {
-    this.tasks.set(taskId, {
-      task,
-      status: 'pending',
-      createdAt: new Date()
-    });
-    this.emit('taskAdded', taskId);
+  addTask(id, task) {
+    this.tasks.set(id, task);
+    this.emit('taskAdded', id, task);
+  }
+
+  removeTask(id) {
+    this.tasks.delete(id);
+    this.emit('taskRemoved', id);
+  }
+
+  getTask(id) {
+    return this.tasks.get(id);
+  }
+
+  getAllTasks() {
+    return Array.from(this.tasks.values());
   }
 
   async startTask(taskId) {

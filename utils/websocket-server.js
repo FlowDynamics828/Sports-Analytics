@@ -14,6 +14,9 @@ const { performance } = require('perf_hooks');
 const winston = require('winston');
 const rateLimiter = require('./rateLimiter'); // Use rateLimiter.js instead of RateLimiterCluster.js
 const MetricsManager = require('./metricsManager'); // Assume this exists for metrics tracking
+const http = require('http');
+const os = require('os');
+const WebSocketManager = require('./websocketManager');
 
 // Configure winston logger to match api.js
 const logger = winston.createLogger({
@@ -30,7 +33,8 @@ const logger = winston.createLogger({
         winston.format.simple()
       )
     }),
-    new winston.transports.File({ filename: 'error.log', level: 'error' })
+    new winston.transports.File({ filename: 'logs/websocket-error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'logs/websocket.log' })
   ]
 });
 
@@ -350,6 +354,27 @@ class WebSocketServer extends EventEmitter {
         metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
       });
     });
+
+    // Add subscription handler
+    this.on('subscribe', ({ clientId, channel }) => {
+      logger.debug(`Client ${clientId} subscribed to channel ${channel}`, {
+        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+      });
+    });
+
+    // Add unsubscribe handler
+    this.on('unsubscribe', ({ clientId, channel }) => {
+      logger.debug(`Client ${clientId} unsubscribed from channel ${channel}`, {
+        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+      });
+    });
+
+    // Add message handler
+    this.on('message', ({ clientId, data }) => {
+      logger.debug(`Message received from client ${clientId}`, {
+        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+      });
+    });
   }
 
   validateAndSetOptions(options) {
@@ -401,6 +426,25 @@ class WebSocketServer extends EventEmitter {
       messages: { sent: 0, received: 0, errors: 0 },
       performance: { latency: [], messageRate: 0 }
     };
+
+    // Store system information for diagnostics
+    this.systemInfo = {
+      platform: os.platform(),
+      arch: os.arch(),
+      cpus: os.cpus().length,
+      totalMemory: os.totalmem(),
+      freeMemory: os.freemem(),
+      uptime: os.uptime()
+    };
+
+    logger.info('WebSocketServer state initialized', {
+      metadata: { 
+        service: 'websocket-server', 
+        timestamp: new Date().toISOString(),
+        cpus: this.systemInfo.cpus,
+        memoryGB: Math.round(this.systemInfo.totalMemory / (1024 * 1024 * 1024) * 10) / 10
+      }
+    });
   }
 
   bindMethods() {
@@ -409,42 +453,74 @@ class WebSocketServer extends EventEmitter {
     this.handleMessage = this.handleMessage.bind(this);
     this.verifyClient = this.verifyClient.bind(this);
     this.handleGracefulShutdown = this.handleGracefulShutdown.bind(this);
+    this.broadcast = this.broadcast.bind(this);
+    this.handleSubscribe = this.handleSubscribe.bind(this);
+    this.handleUnsubscribe = this.handleUnsubscribe.bind(this);
+    this.handleClientMessage = this.handleClientMessage.bind(this);
+    this.sendWelcome = this.sendWelcome.bind(this);
   }
 
   async initialize(server) {
     if (this.isInitialized) {
-      return;
+      logger.info('WebSocketServer already initialized, skipping initialization', {
+        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+      });
+      return true;
     }
 
     if (!server || typeof server !== 'object' || !server.on || !server.close) {
-      throw new Error('Server instance required');
+      throw new Error('Server instance required for WebSocketServer initialization');
     }
 
-    this.server = new WebSocket.Server({
-      server: server, // Ensure server is passed correctly without binding
-      path: this.options.path,
-      clientTracking: true,
-      maxPayload: this.options.maxPayload,
-      verifyClient: this.verifyClient,
-      perMessageDeflate: this.options.compression.enabled ? {
-        zlibDeflateOptions: { level: this.options.compression.level },
-        threshold: this.options.compression.threshold,
-        concurrencyLimit: 5 // Reduced to lower resource usage
-      } : false
-    });
-    
-    this.server.on('connection', this.handleConnection);
-    this.server.on('error', this.handleError);
-    
-    this.setupMonitoring();
-    this.setupShutdownHandlers();
-    
-    this.isInitialized = true;
-    logger.info('WebSocket server initialized successfully', { 
-      metadata: { service: 'websocket-server', timestamp: new Date().toISOString() } 
-    });
-    
-    return true;
+    try {
+      // Create WebSocket server with the existing HTTP server
+      this.server = new WebSocket.Server({
+        server: server, // Ensure server is passed correctly without binding
+        path: this.options.path,
+        clientTracking: true,
+        maxPayload: this.options.maxPayload,
+        verifyClient: this.verifyClient,
+        perMessageDeflate: this.options.compression.enabled ? {
+          zlibDeflateOptions: { level: this.options.compression.level },
+          threshold: this.options.compression.threshold,
+          concurrencyLimit: 5 // Reduced to lower resource usage
+        } : false
+      });
+      
+      // Register event handlers
+      this.server.on('connection', this.handleConnection);
+      this.server.on('error', this.handleError);
+      this.server.on('close', () => {
+        logger.info('WebSocket server closed', {
+          metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+        });
+      });
+      
+      // Setup monitoring and shutdown handlers
+      this.setupMonitoring();
+      this.setupShutdownHandlers();
+      
+      this.isInitialized = true;
+      
+      // Log with server information
+      logger.info('WebSocket server initialized successfully', { 
+        metadata: { 
+          service: 'websocket-server', 
+          timestamp: new Date().toISOString(),
+          path: this.options.path,
+          maxPayload: `${Math.round(this.options.maxPayload / (1024 * 1024))}MB`
+        } 
+      });
+      
+      return true;
+    } catch (error) {
+      logger.error('WebSocket server initialization failed:', {
+        error: error.message,
+        stack: error.stack,
+        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+      });
+      throw error;
+    }
   }
 
   async verifyClient(info, callback) {
@@ -466,15 +542,26 @@ class WebSocketServer extends EventEmitter {
         }
       }
 
-      // Verify authentication
-      const token = this.extractToken(info.req);
-      if (!token) {
-        logger.warn('Authentication required for WebSocket connection:', { ip: clientIP, timestamp: new Date().toISOString() });
-        return callback(false, 401, 'Authentication Required');
-      }
+      // Verify authentication - only if JWT secret is configured
+      if (this.options.jwtSecret) {
+        const token = this.extractToken(info.req);
+        if (!token) {
+          logger.warn('Authentication required for WebSocket connection:', { ip: clientIP, timestamp: new Date().toISOString() });
+          return callback(false, 401, 'Authentication Required');
+        }
 
-      const user = await this.verifyToken(token);
-      info.req.user = user;
+        try {
+          const user = await this.verifyToken(token);
+          info.req.user = user;
+        } catch (authError) {
+          logger.error('JWT verification failed:', {
+            error: authError.message,
+            ip: clientIP,
+            timestamp: new Date().toISOString()
+          });
+          return callback(false, 401, 'Invalid Authentication');
+        }
+      }
 
       // Check server capacity
       if (this.clients.size >= this.options.maxClients) {
@@ -482,6 +569,7 @@ class WebSocketServer extends EventEmitter {
         return callback(false, 503, 'Server At Capacity');
       }
 
+      // All checks passed
       callback(true);
     } catch (error) {
       logger.error('WebSocket client verification failed:', { 
@@ -490,7 +578,7 @@ class WebSocketServer extends EventEmitter {
         ip: info.req.socket.remoteAddress, 
         timestamp: new Date().toISOString() 
       });
-      callback(false, 401, 'Authentication Failed');
+      callback(false, 500, 'Internal Server Error');
     }
   }
 
@@ -500,22 +588,34 @@ class WebSocketServer extends EventEmitter {
       const clientIP = req.socket.remoteAddress;
 
       ws.id = clientId;
-      ws.user = req.user;
+      ws.user = req.user || { anonymous: true };
       ws.isAlive = true;
       ws.subscriptions = new Set();
       ws.ip = clientIP;
+      ws.connectTime = Date.now();
 
       this.initializeClient(ws, clientIP);
       this.setupClientHandlers(ws);
       
+      // Send welcome message
       await this.sendWelcome(ws);
 
+      // Update metrics
       this.metrics.connections.active++;
       this.metrics.connections.total++;
+      
       logger.info('WebSocket client connected:', { 
         clientId, 
-        ip: clientIP, 
+        ip: clientIP,
+        userAgent: req.headers['user-agent'],
         timestamp: new Date().toISOString() 
+      });
+      
+      // Emit connection event for external listeners
+      this.emit('client-connected', {
+        clientId,
+        ip: clientIP,
+        user: ws.user
       });
 
     } catch (error) {
@@ -524,16 +624,53 @@ class WebSocketServer extends EventEmitter {
   }
 
   setupClientHandlers(ws) {
+    // Handle incoming messages
     ws.on('message', (data) => this.handleMessage(ws, data));
-    ws.on('close', () => this.handleClientDisconnect(ws));
+    
+    // Handle connection close
+    ws.on('close', (code, reason) => {
+      logger.debug(`Client ${ws.id} closed connection with code ${code}: ${reason || 'No reason provided'}`, {
+        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+      });
+      this.handleClientDisconnect(ws, code, reason);
+    });
+    
+    // Handle errors
     ws.on('error', (error) => this.handleClientError(ws, error));
+    
+    // Handle pong responses (for heartbeat)
     ws.on('pong', () => this.handlePong(ws));
+    
+    // Send initial ping to verify connection
+    setTimeout(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+      }
+    }, 1000);
   }
 
   async handleMessage(ws, data) {
     try {
       const startTime = performance.now();
-      const message = await this.decodeMessage(data);
+      
+      // Decode the message
+      let message;
+      try {
+        message = await this.decodeMessage(data);
+      } catch (parseError) {
+        logger.warn(`Failed to parse message from client ${ws.id}:`, {
+          error: parseError.message,
+          timestamp: new Date().toISOString()
+        });
+        
+        await this.sendToClient(ws, {
+          type: 'error',
+          message: 'Invalid message format',
+          timestamp: Date.now()
+        });
+        
+        return;
+      }
       
       // Rate limit with memory check
       if (this.options.security.rateLimiting.enabled) {
@@ -551,6 +688,7 @@ class WebSocketServer extends EventEmitter {
         });
       }
 
+      // Process message based on type
       switch (message.type) {
         case 'subscribe':
           await this.handleSubscribe(ws, message.data);
@@ -561,10 +699,28 @@ class WebSocketServer extends EventEmitter {
         case 'message':
           await this.handleClientMessage(ws, message.data);
           break;
+        case 'ping':
+          await this.sendToClient(ws, {
+            type: 'pong',
+            timestamp: Date.now()
+          });
+          break;
+        case 'get_subscriptions':
+          await this.sendSubscriptionsList(ws);
+          break;
         default:
-          throw new Error('Invalid message type');
+          logger.warn(`Unknown message type from client ${ws.id}: ${message.type}`, {
+            timestamp: new Date().toISOString()
+          });
+          
+          await this.sendToClient(ws, {
+            type: 'error',
+            message: `Unknown message type: ${message.type}`,
+            timestamp: Date.now()
+          });
       }
 
+      // Update metrics
       this.metrics.messages.received++;
       this.metrics.performance.latency.push(performance.now() - startTime);
       if (this.metrics.performance.latency.length > 100) {
@@ -573,6 +729,28 @@ class WebSocketServer extends EventEmitter {
 
     } catch (error) {
       this.handleMessageError(ws, error);
+    }
+  }
+
+  async sendSubscriptionsList(ws) {
+    try {
+      const subscriptionsList = Array.from(ws.subscriptions || []);
+      
+      await this.sendToClient(ws, {
+        type: 'subscriptions_list',
+        data: subscriptionsList,
+        count: subscriptionsList.length,
+        timestamp: Date.now()
+      });
+      
+      return true;
+    } catch (error) {
+      logger.error(`Error sending subscriptions list to client ${ws.id}:`, {
+        error: error.message,
+        stack: error.stack,
+        timestamp: new Date().toISOString()
+      });
+      return false;
     }
   }
 
@@ -588,13 +766,32 @@ class WebSocketServer extends EventEmitter {
     });
 
     let sent = 0;
+    let failed = 0;
+    const startTime = performance.now();
+    
     for (const clientId of subscribers) {
       const client = this.clients.get(clientId);
       if (client?.readyState === WebSocket.OPEN) {
-        await this.sendToClient(client, message);
-        sent++;
+        try {
+          await this.sendToClient(client, message);
+          sent++;
+        } catch (error) {
+          failed++;
+          logger.error(`Error broadcasting to client ${clientId}:`, {
+            error: error.message,
+            channel,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
     }
+
+    const duration = performance.now() - startTime;
+    
+    // Log broadcast metrics
+    logger.debug(`Broadcast to channel ${channel}: ${sent} delivered, ${failed} failed in ${Math.round(duration)}ms`, {
+      metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
+    });
 
     this.metrics.messages.sent += sent;
     return sent;
@@ -606,8 +803,13 @@ class WebSocketServer extends EventEmitter {
         throw new Error('Client connection not open');
       }
 
+      // Prepare data if it's an object
+      const messageData = typeof data === 'object' && !(data instanceof Buffer)
+        ? await this.encodeMessage(data)
+        : data;
+
       await new Promise((resolve, reject) => {
-        ws.send(data, (error) => {
+        ws.send(messageData, (error) => {
           if (error) reject(error);
           else resolve();
         });
@@ -627,8 +829,29 @@ class WebSocketServer extends EventEmitter {
   }
 
   extractToken(req) {
-    const header = req.headers['authorization'];
-    return header?.startsWith('Bearer ') ? header.slice(7) : null;
+    // Try to extract from Authorization header
+    const authHeader = req.headers['authorization'];
+    if (authHeader?.startsWith('Bearer ')) {
+      return authHeader.slice(7);
+    }
+
+    // Try to extract from query parameters
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const token = url.searchParams.get('token');
+    if (token) {
+      return token;
+    }
+
+    // Try to extract from cookies
+    const cookies = req.headers.cookie;
+    if (cookies) {
+      const tokenMatch = cookies.split(';').find(c => c.trim().startsWith('token='));
+      if (tokenMatch) {
+        return tokenMatch.split('=')[1].trim();
+      }
+    }
+
+    return null;
   }
 
   async verifyToken(token) {
@@ -637,16 +860,30 @@ class WebSocketServer extends EventEmitter {
 
   async encodeMessage(data) {
     const message = JSON.stringify(data);
-    return this.options.compression.enabled
+    return this.options.compression.enabled && message.length > this.options.compression.threshold
       ? await promisify(zlib.deflate)(message)
       : Buffer.from(message);
   }
 
   async decodeMessage(data) {
-    const message = this.options.compression.enabled
-      ? await promisify(zlib.inflate)(data)
-      : data;
-    return JSON.parse(message.toString());
+    try {
+      // Try to detect if the message is compressed
+      const isCompressed = data[0] === 0x78 && (data[1] === 0x01 || data[1] === 0x9C || data[1] === 0xDA);
+      
+      const message = isCompressed
+        ? await promisify(zlib.inflate)(data)
+        : data;
+        
+      return JSON.parse(message.toString());
+    } catch (parseError) {
+      // If parsing fails, try again with inflation (in case compression detection failed)
+      try {
+        const inflated = await promisify(zlib.inflate)(data);
+        return JSON.parse(inflated.toString());
+      } catch (inflateError) {
+        throw parseError; // Throw the original error if both methods fail
+      }
+    }
   }
 
   getIPConnections(ip) {
@@ -658,17 +895,23 @@ class WebSocketServer extends EventEmitter {
     this.ipConnections.set(ip, this.getIPConnections(ip) + 1);
   }
 
-  handleClientDisconnect(ws) {
+  handleClientDisconnect(ws, code, reason) {
     const clientIP = ws.ip;
+    const disconnectTime = Date.now();
+    const connectionDuration = disconnectTime - (ws.connectTime || disconnectTime);
     
     // Clean up subscriptions
-    ws.subscriptions?.forEach(channel => {
-      const subs = this.subscriptions.get(channel);
-      subs?.delete(ws.id);
-      if (subs?.size === 0) {
-        this.subscriptions.delete(channel);
-      }
-    });
+    if (ws.subscriptions) {
+      ws.subscriptions.forEach(channel => {
+        const subs = this.subscriptions.get(channel);
+        if (subs) {
+          subs.delete(ws.id);
+          if (subs.size === 0) {
+            this.subscriptions.delete(channel);
+          }
+        }
+      });
+    }
 
     // Update IP connections
     const ipCount = this.getIPConnections(clientIP);
@@ -678,17 +921,35 @@ class WebSocketServer extends EventEmitter {
       this.ipConnections.delete(clientIP);
     }
 
+    // Remove from clients map
     this.clients.delete(ws.id);
+    
+    // Update metrics
     this.metrics.connections.active--;
+    
+    // Log the disconnection with more details
     logger.info('WebSocket client disconnected:', { 
       clientId: ws.id, 
-      ip: clientIP, 
+      ip: clientIP,
+      code: code || 'unknown',
+      reason: reason || 'No reason provided',
+      connectionDuration: `${Math.round(connectionDuration / 1000)}s`,
       timestamp: new Date().toISOString() 
+    });
+    
+    // Emit disconnect event for external listeners
+    this.emit('client-disconnected', {
+      clientId: ws.id,
+      ip: clientIP,
+      code,
+      reason,
+      connectionDuration
     });
   }
 
   handlePong(ws) {
     ws.isAlive = true;
+    ws.lastPong = Date.now();
   }
 
   // Error Handlers
@@ -699,6 +960,12 @@ class WebSocketServer extends EventEmitter {
       timestamp: new Date().toISOString() 
     });
     this.metrics.messages.errors++;
+    
+    // Emit error event for external monitoring
+    this.emit('server-error', {
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
   }
 
   handleClientError(ws, error) {
@@ -708,7 +975,29 @@ class WebSocketServer extends EventEmitter {
       timestamp: new Date().toISOString() 
     });
     this.metrics.messages.errors++;
-    ws.terminate();
+    
+    // Try to notify client about the error
+    try {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Internal server error',
+          timestamp: Date.now()
+        }));
+      }
+    } catch (sendError) {
+      // Ignore send errors
+    }
+    
+    // Terminate the connection to clean up resources
+    try {
+      ws.terminate();
+    } catch (terminateError) {
+      logger.warn(`Error terminating client ${ws.id} connection:`, {
+        error: terminateError.message,
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 
   handleMessageError(ws, error) {
@@ -718,10 +1007,15 @@ class WebSocketServer extends EventEmitter {
       timestamp: new Date().toISOString() 
     });
     this.metrics.messages.errors++;
+    
+    // Send error notification to client
     this.sendToClient(ws, {
       type: 'error',
-      message: error.message
-    }).catch(() => {});
+      message: error.message,
+      timestamp: Date.now()
+    }).catch(() => {
+      // Ignore send errors
+    });
   }
 
   handleSendError(ws, error) {
@@ -731,6 +1025,19 @@ class WebSocketServer extends EventEmitter {
       timestamp: new Date().toISOString() 
     });
     this.metrics.messages.errors++;
+    
+    // Check if the connection is still open
+    if (ws.readyState !== WebSocket.OPEN) {
+      logger.debug(`Client ${ws.id} connection not open, terminating`, {
+        timestamp: new Date().toISOString()
+      });
+      
+      try {
+        ws.terminate();
+      } catch (terminateError) {
+        // Ignore terminate errors
+      }
+    }
   }
 
   // Monitoring & Maintenance
@@ -742,13 +1049,31 @@ class WebSocketServer extends EventEmitter {
 
     // Heartbeat checking
     const heartbeatInterval = setInterval(() => {
+      const now = Date.now();
       this.clients.forEach((ws) => {
+        // If client hasn't responded to previous ping, terminate
         if (!ws.isAlive) {
+          logger.debug(`Client ${ws.id} heartbeat timeout, terminating connection`, {
+            timestamp: new Date().toISOString()
+          });
           ws.terminate();
-          this.handleClientDisconnect(ws);
+          this.handleClientDisconnect(ws, 1008, 'Heartbeat timeout');
+          return;
         }
+
+        // Mark as not alive until pong response
         ws.isAlive = false;
-        ws.ping();
+        
+        // Send ping
+        try {
+          ws.ping();
+        } catch (pingError) {
+          logger.debug(`Error sending ping to client ${ws.id}:`, {
+            error: pingError.message,
+            timestamp: new Date().toISOString()
+          });
+          ws.terminate();
+        }
       });
     }, this.options.heartbeatInterval);
     this.monitoringIntervals.push(heartbeatInterval);
@@ -775,6 +1100,18 @@ class WebSocketServer extends EventEmitter {
       }
     }, 600000); // Clean every 10 minutes
     this.monitoringIntervals.push(cleanupInterval);
+    
+    // Log status periodically
+    const statusInterval = setInterval(() => {
+      logger.info('WebSocketServer status:', {
+        activeConnections: this.clients.size,
+        totalMessages: this.metrics.messages.sent + this.metrics.messages.received,
+        uniqueIPs: this.ipConnections.size,
+        subscriptionChannels: this.subscriptions.size,
+        timestamp: new Date().toISOString()
+      });
+    }, 900000); // Every 15 minutes
+    this.monitoringIntervals.push(statusInterval);
   }
 
   collectMetrics() {
@@ -933,42 +1270,36 @@ class WebSocketServer extends EventEmitter {
         });
 
         if (this.clients && this.clients.size > 0) {
-          const shutdownMessage = typeof this.encodeMessage === 'function'
-            ? await this.encodeMessage({
-                type: 'system',
-                message: 'Server shutting down',
-                timestamp: new Date().toISOString()
-              })
-            : JSON.stringify({
-                type: 'system',
-                message: 'Server shutting down',
-                timestamp: new Date().toISOString()
-              });
+          const shutdownMessage = JSON.stringify({
+            type: 'system',
+            message: 'Server shutting down',
+            timestamp: new Date().toISOString()
+          });
 
           // Use a timeout to ensure we don't wait too long
           const notifyPromise = Promise.all(
             Array.from(this.clients.values())
               .map(ws => {
                 try {
-                  return typeof this.sendToClient === 'function'
-                    ? this.sendToClient(ws, shutdownMessage).catch(() => {})
-                    : new Promise(resolve => {
-                        if (ws.readyState === WebSocket.OPEN) {
-                          ws.send(shutdownMessage, () => resolve());
-                        } else {
-                          resolve();
-                        }
-                      });
+                  return new Promise(resolve => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                      ws.send(shutdownMessage, () => resolve());
+                    } else {
+                      resolve();
+                    }
+                  });
                 } catch (e) {
                   return Promise.resolve();
                 }
               })
           );
 
-          await Promise.race([
+          Promise.race([
             notifyPromise,
             new Promise(resolve => setTimeout(resolve, 3000)) // 3 second timeout for notifications
-          ]);
+          ]).catch(() => {
+            // Ignore errors in notification
+          });
         }
       } catch (error) {
         logger.warn('Error notifying clients during shutdown:', {
@@ -984,60 +1315,26 @@ class WebSocketServer extends EventEmitter {
             metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
           });
 
-          const closeStart = Date.now();
-          const clientClosePromises = [];
-
           for (const ws of this.clients.values()) {
             try {
-              // Create a promise that resolves when the connection closes or times out
-              const closePromise = new Promise(resolve => {
-                // Set up one-time close event handler
-                const onClose = () => {
-                  ws.removeEventListener('close', onClose);
-                  resolve();
-                };
-
-                ws.addEventListener('close', onClose, { once: true });
-
-                // Close the connection
-                ws.close(1001, 'Server shutting down');
-
-                // Force terminate after 100ms if not closed gracefully
-                setTimeout(() => {
-                  ws.removeEventListener('close', onClose);
-                  if (ws.readyState !== WebSocket.CLOSED) {
-                    try {
-                      ws.terminate();
-                    } catch (e) {
-                      // Ignore terminate errors
-                    }
+              // Close the connection
+              ws.close(1001, 'Server shutting down');
+              
+              // Force terminate after 100ms if not closed gracefully
+              setTimeout(() => {
+                if (ws.readyState !== WebSocket.CLOSED) {
+                  try {
+                    ws.terminate();
+                  } catch (e) {
+                    // Ignore terminate errors
                   }
-                  resolve();
-                }, 100);
-              });
-
-              clientClosePromises.push(closePromise);
-
-              // Add a small delay between closing connections to prevent overwhelming the system
-              if (Date.now() - closeStart > 5000) {
-                logger.warn('Connection closing taking too long, proceeding with remaining shutdown steps', {
-                  metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-                });
-                break; // Don't spend more than 5 seconds closing
-              }
-
-              await new Promise(resolve => setTimeout(resolve, 5));
+                }
+              }, 100);
             } catch (error) {
               // Just log and continue
               logger.debug(`Error closing client connection: ${error.message}`);
             }
           }
-
-          // Wait for all connections to close with a timeout
-          await Promise.race([
-            Promise.all(clientClosePromises),
-            new Promise(resolve => setTimeout(resolve, 5000)) // 5 second timeout for all connections
-          ]);
         }
       } catch (error) {
         logger.warn('Error during client connection cleanup:', {
@@ -1049,25 +1346,6 @@ class WebSocketServer extends EventEmitter {
 
       // 4. Remove all event listeners to prevent memory leaks
       try {
-        logger.info('Removing all event listeners', {
-          metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-        });
-
-        // First remove listeners from all clients
-        if (this.clients) {
-          for (const ws of this.clients.values()) {
-            try {
-              // Remove all listeners from the client
-              if (ws.removeAllListeners) {
-                ws.removeAllListeners();
-              }
-            } catch (e) {
-              // Ignore errors removing listeners
-            }
-          }
-        }
-
-        // Then remove our own listeners
         this.removeAllListeners();
       } catch (error) {
         logger.warn('Error removing event listeners:', {
@@ -1078,10 +1356,6 @@ class WebSocketServer extends EventEmitter {
 
       // 5. Clear all data structures to free memory
       try {
-        logger.info('Clearing data structures', {
-          metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-        });
-
         if (this.clients) this.clients.clear();
         if (this.subscriptions) this.subscriptions.clear();
         if (this.ipConnections) this.ipConnections.clear();
@@ -1093,34 +1367,10 @@ class WebSocketServer extends EventEmitter {
         });
       }
 
-      // 6. Close the WebSocket server with timeout protection
+      // 6. Close the WebSocket server
       if (this.server) {
         try {
-          logger.info('Closing WebSocket server', {
-            metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-          });
-
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              logger.warn('WebSocket server close timed out, forcing shutdown', {
-                metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-              });
-              resolve();
-            }, 5000);
-
-            this.server.close((err) => {
-              clearTimeout(timeout);
-              if (err) {
-                logger.warn(`Error closing WebSocket server: ${err.message}`, {
-                  metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-                });
-                // Don't reject, just resolve to continue shutdown
-                resolve();
-              } else {
-                resolve();
-              }
-            });
-          });
+          this.server.close();
         } catch (error) {
           logger.warn('Error during WebSocket server close:', {
             error: error.message,
@@ -1135,9 +1385,6 @@ class WebSocketServer extends EventEmitter {
       if (global.gc) {
         try {
           global.gc();
-          logger.info('Garbage collection triggered during WebSocket shutdown', {
-            metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-          });
         } catch (error) {
           logger.warn('Error during garbage collection:', {
             error: error.message,
@@ -1169,125 +1416,22 @@ class WebSocketServer extends EventEmitter {
     }
   }
 
-  /**
-   * Force cleanup of all resources as a last resort
-   * @private
-   */
   _forceCleanupResources() {
-    try {
-      logger.warn('Performing forced resource cleanup', {
-        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-      });
-
-      // Clear all intervals
-      if (this.monitoringIntervals) {
-        this.monitoringIntervals.forEach(interval => {
-          try { clearInterval(interval); } catch (e) {}
-        });
-        this.monitoringIntervals = [];
-      }
-
-      if (this.checkMemoryUsageInterval) {
-        try { clearInterval(this.checkMemoryUsageInterval); } catch (e) {}
-        this.checkMemoryUsageInterval = null;
-      }
-
-      if (this.eventListenerCleanupInterval) {
-        try { clearInterval(this.eventListenerCleanupInterval); } catch (e) {}
-        this.eventListenerCleanupInterval = null;
-      }
-
-      // Force terminate all clients
-      if (this.clients) {
-        for (const ws of this.clients.values()) {
-          try { ws.terminate(); } catch (e) {}
-        }
-        try { this.clients.clear(); } catch (e) {}
-      }
-
-      // Clear all data structures
-      if (this.subscriptions) try { this.subscriptions.clear(); } catch (e) {}
-      if (this.ipConnections) try { this.ipConnections.clear(); } catch (e) {}
-      if (this.activeListeners) try { this.activeListeners.clear(); } catch (e) {}
-
-      // Remove all event listeners
-      try { this.removeAllListeners(); } catch (e) {}
-
-      // Force close server
-      if (this.server) {
-        try {
-          this.server.close();
-          this.server = null;
-        } catch (e) {}
-      }
-
-      // Force garbage collection
-      if (global.gc) {
-        try { global.gc(); } catch (e) {}
-      }
-
-      logger.info('Forced resource cleanup completed', {
-        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-      });
-    } catch (error) {
-      logger.error('Error during forced resource cleanup:', {
-        error: error.message,
-        metadata: { service: 'websocket-server', timestamp: new Date().toISOString() }
-      });
-    }
-  }
-
-  // Subscription Handlers
-  async handleSubscribe(ws, channel) {
-    if (!channel || typeof channel !== 'string') {
-      throw new Error('Invalid subscription channel');
-    }
-
-    ws.subscriptions.add(channel);
-    if (!this.subscriptions.has(channel)) {
-      this.subscriptions.set(channel, new Set());
-    }
-    this.subscriptions.get(channel).add(ws.id);
-
-    logger.info(`Client ${ws.id} subscribed to channel: ${channel}`, { 
-      timestamp: new Date().toISOString() 
-    });
-  }
-
-  async handleUnsubscribe(ws, channel) {
-    if (!channel || typeof channel !== 'string') return;
-
-    ws.subscriptions.delete(channel);
-    const subs = this.subscriptions.get(channel);
-    if (subs) {
-      subs.delete(ws.id);
-      if (subs.size === 0) {
-        this.subscriptions.delete(channel);
-      }
-    }
-
-    logger.info(`Client ${ws.id} unsubscribed from channel: ${channel}`, { 
-      timestamp: new Date().toISOString() 
-    });
-  }
-
-  async handleClientMessage(ws, data) {
-    logger.info(`Received message from client ${ws.id}:`, { 
-      data, 
-      timestamp: new Date().toISOString() 
-    });
-    this.broadcast(ws.subscriptions, data); // Broadcast to all subscribed channels
-  }
-
-  async sendWelcome(ws) {
-    const welcomeMessage = await this.encodeMessage({
-      type: 'welcome',
-      clientId: ws.id,
-      timestamp: Date.now()
-    });
-    await this.sendToClient(ws, welcomeMessage);
+    // Implement force cleanup logic here
   }
 }
 
-// Export class for instantiation
-module.exports = { WebSocketServer };
+const server = http.createServer((req, res) => {
+  res.writeHead(200);
+  res.end('WebSocket server is running');
+});
+
+const wsManager = new WebSocketManager(server);
+
+wsManager.on('message', (message) => {
+  console.log('Received message:', message);
+});
+
+server.listen(8080, () => {
+  console.log('Server is listening on port 8080');
+});

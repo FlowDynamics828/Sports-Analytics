@@ -39,167 +39,66 @@ class WebSocketClient {
      * @returns {Promise<void>} Resolves when connected
      */
     async connect() {
-        try {
-            // Clear any existing connection
-            if (this.socket) {
-                console.log('Closing existing socket connection');
-                this.socket.close();
-                this.socket = null;
+        return new Promise((resolve, reject) => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                resolve();
+                return;
             }
 
-            // Clear existing intervals/timeouts
-            this.clearTimers();
-
-            // Get token from localStorage
-            const token = localStorage.getItem('token');
-            if (!token) {
-                throw new Error('Authentication token not found');
-            }
-
-            // Determine protocol
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/api/ws?token=${encodeURIComponent(token)}`;
+            const wsUrl = `${protocol}//${window.location.hostname}:5150/ws`;
+            this.connectionTimeout = setTimeout(() => {
+                console.warn('WebSocket connection timeout');
+                reject(new Error('WebSocket connection timeout'));
+            }, 10000); // 10 second timeout
 
-            return new Promise((resolve, reject) => {
-                // Create timeout for initial connection
-                this.connectionTimeout = setTimeout(() => {
-                    console.warn('WebSocket connection timeout');
-                    reject(new Error('WebSocket connection timeout'));
-                }, 10000); // 10 second timeout
+            console.log('Connecting to WebSocket server...');
+            this.socket = new WebSocket(wsUrl);
 
-                console.log('Connecting to WebSocket server...');
-                this.socket = new WebSocket(wsUrl);
+            this.socket.onopen = () => {
+                console.log('WebSocket connected');
+                clearTimeout(this.connectionTimeout);
+                this.connectionTimeout = null;
+                this.status = 'connected';
+                this.reconnectAttempts = 0;
+                this.startPingInterval();
+                this.updateStatus('connected');
+                
+                // Resubscribe to previously subscribed leagues
+                this.resubscribe();
+                
+                resolve();
+            };
 
-                this.socket.onopen = () => {
-                    console.log('WebSocket connected');
+            this.socket.onclose = (event) => {
+                console.log(`WebSocket closed: ${event.code} ${event.reason}`);
+                this.status = 'disconnected';
+                this.updateStatus('disconnected');
+                
+                if (this.connectionTimeout) {
                     clearTimeout(this.connectionTimeout);
                     this.connectionTimeout = null;
-                    this.status = 'connected';
-                    this.reconnectAttempts = 0;
-                    this.startPingInterval();
-                    this.updateStatus('connected');
-                    
-                    // Resubscribe to previously subscribed leagues
-                    this.resubscribe();
-                    
-                    resolve();
-                };
+                }
+                
+                // Only attempt reconnect if not a normal closure
+                // and not a token auth issue (4001)
+                if (event.code !== 1000 && event.code !== 4001) {
+                    this.scheduleReconnect();
+                } else if (event.code === 4001) {
+                    // Authentication issue - redirect to login
+                    console.warn('WebSocket auth failed - token likely expired');
+                    localStorage.removeItem('token');
+                    window.location.href = '/login';
+                }
+            };
 
-                this.socket.onclose = (event) => {
-                    console.log(`WebSocket closed: ${event.code} ${event.reason}`);
-                    this.status = 'disconnected';
-                    this.updateStatus('disconnected');
-                    
-                    if (this.connectionTimeout) {
-                        clearTimeout(this.connectionTimeout);
-                        this.connectionTimeout = null;
-                    }
-                    
-                    // Only attempt reconnect if not a normal closure
-                    // and not a token auth issue (4001)
-                    if (event.code !== 1000 && event.code !== 4001) {
-                        this.scheduleReconnect();
-                    } else if (event.code === 4001) {
-                        // Authentication issue - redirect to login
-                        console.warn('WebSocket auth failed - token likely expired');
-                        localStorage.removeItem('token');
-                        window.location.replace('/login?redirect=' + encodeURIComponent(window.location.pathname));
-                    }
-                };
+            this.socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                this.socket.close();
+            };
 
-                this.socket.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    this.status = 'error';
-                    this.updateStatus('error');
-                    
-                    // If we're still trying to connect for the first time, reject the promise
-                    if (this.connectionTimeout) {
-                        clearTimeout(this.connectionTimeout);
-                        this.connectionTimeout = null;
-                        reject(error);
-                    }
-                };
-
-                this.socket.onmessage = this.handleMessage;
-            });
-        } catch (error) {
-            console.error('WebSocket connection error:', error);
-            this.status = 'error';
-            this.updateStatus('error');
-            throw error;
-        }
-    }
-
-    /**
-     * Start ping interval to keep connection alive
-     */
-    startPingInterval() {
-        // Clear any existing ping interval
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-        }
-
-        // Ping every 30 seconds to keep connection alive
-        this.pingInterval = setInterval(() => {
-            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
-                this.send({ type: 'ping', timestamp: Date.now() });
-                this.lastPingTime = Date.now();
-                console.debug('Ping sent to server');
-            }
-        }, 30000); // 30 seconds
-    }
-
-    /**
-     * Schedule a reconnection attempt with exponential backoff
-     */
-    scheduleReconnect() {
-        // Clear any existing reconnect timeout
-        if (this.reconnectTimeout) {
-            clearTimeout(this.reconnectTimeout);
-        }
-
-        // Check if we've hit the max reconnect attempts
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.log('Maximum reconnection attempts reached. Giving up.');
-            return;
-        }
-
-        this.reconnectAttempts++;
-        
-        // Exponential backoff with jitter
-        const delay = Math.min(
-            this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1),
-            60000 // Max 1 minute delay
-        ) * (0.9 + Math.random() * 0.2); // Add 10% jitter
-
-        console.log(`Scheduling reconnect attempt ${this.reconnectAttempts} in ${Math.round(delay)}ms`);
-        
-        this.reconnectTimeout = setTimeout(() => {
-            console.log(`Attempting reconnect ${this.reconnectAttempts}/${this.maxReconnectAttempts}`);
-            this.connect().catch(error => {
-                console.error('Reconnection failed:', error);
-            });
-        }, delay);
-    }
-
-    /**
-     * Clear all timers (intervals and timeouts)
-     */
-    clearTimers() {
-        if (this.pingInterval) {
-            clearInterval(this.pingInterval);
-            this.pingInterval = null;
-        }
-        
-        if (this.reconnectTimeout) {
-            clearTimeout(this.reconnectTimeout);
-            this.reconnectTimeout = null;
-        }
-        
-        if (this.connectionTimeout) {
-            clearTimeout(this.connectionTimeout);
-            this.connectionTimeout = null;
-        }
+            this.socket.onmessage = this.handleMessage;
+        });
     }
 
     /**
@@ -207,36 +106,14 @@ class WebSocketClient {
      * @param {MessageEvent} event - WebSocket message event
      */
     handleMessage(event) {
-        try {
-            // Parse message
-            const message = JSON.parse(event.data);
-            
-            // Handle automatic pongs
-            if (message.type === 'pong') {
-                // Update latency metrics
-                const latency = Date.now() - this.lastPingTime;
-                console.debug(`WebSocket ping: ${latency}ms`);
-                return;
-            }
-            
-            console.log('WebSocket message received:', message);
-            
-            // Call the onMessage callback if it exists
-            if (typeof this.onMessage === 'function') {
-                this.onMessage(message);
-            }
-            
-            // Call all registered message handlers
-            this.messageHandlers.forEach(handler => {
-                try {
-                    handler(message);
-                } catch (handlerError) {
-                    console.error('Error in message handler:', handlerError);
-                }
-            });
-        } catch (error) {
-            console.error('Error handling WebSocket message:', error);
+        const message = JSON.parse(event.data);
+        console.log('Received message:', message);
+
+        if (this.onMessage) {
+            this.onMessage(message);
         }
+
+        this.messageHandlers.forEach(handler => handler(message));
     }
 
     /**
@@ -245,18 +122,11 @@ class WebSocketClient {
      * @returns {boolean} True if message was sent successfully
      */
     send(data) {
-        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
-            console.error('Cannot send message: WebSocket not connected');
-            return false;
-        }
-        
-        try {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
             this.socket.send(JSON.stringify(data));
             return true;
-        } catch (error) {
-            console.error('Error sending WebSocket message:', error);
-            return false;
         }
+        return false;
     }
 
     /**
@@ -265,25 +135,15 @@ class WebSocketClient {
      * @returns {boolean} True if subscription request was sent
      */
     subscribe(league) {
-        if (!league) return false;
-        
-        const leagueStr = String(league).toLowerCase();
-        
-        // Check if already subscribed
-        if (this.subscribedLeagues.includes(leagueStr)) {
-            console.log(`Already subscribed to ${leagueStr}`);
-            return true;
+        if (this.subscribedLeagues.includes(league)) {
+            return false;
         }
-        
-        // Add to subscribed leagues
-        this.subscribedLeagues.push(leagueStr);
-        
-        // Send subscription message
-        console.log(`Subscribing to ${leagueStr} updates`);
-        return this.send({
-            type: 'subscribe',
-            league: leagueStr
-        });
+
+        const success = this.send({ type: 'subscribe', league });
+        if (success) {
+            this.subscribedLeagues.push(league);
+        }
+        return success;
     }
 
     /**
@@ -292,26 +152,22 @@ class WebSocketClient {
      * @returns {boolean} True if unsubscription request was sent
      */
     unsubscribe(league) {
-        if (!league) return false;
-        
-        const leagueStr = String(league).toLowerCase();
-        
-        // Remove from subscribed leagues
-        this.subscribedLeagues = this.subscribedLeagues.filter(l => l !== leagueStr);
-        
-        // Send unsubscription message
-        console.log(`Unsubscribing from ${leagueStr} updates`);
-        return this.send({
-            type: 'unsubscribe',
-            league: leagueStr
-        });
+        const index = this.subscribedLeagues.indexOf(league);
+        if (index === -1) {
+            return false;
+        }
+
+        const success = this.send({ type: 'unsubscribe', league });
+        if (success) {
+            this.subscribedLeagues.splice(index, 1);
+        }
+        return success;
     }
 
     /**
      * Resubscribe to all previously subscribed leagues
      */
     resubscribe() {
-        // Resubscribe to all previously subscribed leagues
         const leagues = [...this.subscribedLeagues];
         if (leagues.length === 0) {
             console.log('No leagues to resubscribe to');
@@ -331,76 +187,80 @@ class WebSocketClient {
      * Unsubscribe from all leagues
      */
     unsubscribeAll() {
-        // Unsubscribe from all leagues
         console.log('Unsubscribing from all leagues');
         const leagues = [...this.subscribedLeagues];
         leagues.forEach(league => this.unsubscribe(league));
     }
 
     /**
-     * Add a message handler function
-     * @param {Function} handler - Message handler function
+     * Schedule a reconnect attempt
      */
-    addMessageHandler(handler) {
-        if (typeof handler === 'function') {
-            this.messageHandlers.push(handler);
+    scheduleReconnect() {
+        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+            console.error('Max reconnect attempts reached');
+            return;
         }
+
+        this.reconnectAttempts++;
+        const delay = this.reconnectDelay * this.reconnectAttempts;
+        console.log(`Reconnecting in ${delay / 1000} seconds...`);
+
+        this.reconnectTimeout = setTimeout(() => {
+            this.connect().catch(error => {
+                console.error('Reconnect failed:', error);
+                this.scheduleReconnect();
+            });
+        }, delay);
     }
 
     /**
-     * Remove a message handler function
-     * @param {Function} handler - Message handler function to remove
+     * Start the ping interval to keep the connection alive
      */
-    removeMessageHandler(handler) {
-        this.messageHandlers = this.messageHandlers.filter(h => h !== handler);
+    startPingInterval() {
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+        }
+
+        this.pingInterval = setInterval(() => {
+            if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                this.send({ type: 'ping' });
+                this.lastPingTime = Date.now();
+            }
+        }, 30000); // Ping every 30 seconds
     }
 
     /**
-     * Update connection status and notify listeners
-     * @param {string} status - New connection status
+     * Update the connection status
+     * @param {string} status - New status
      */
     updateStatus(status) {
-        if (this.onStatusChange && typeof this.onStatusChange === 'function') {
+        this.status = status;
+        if (this.onStatusChange) {
             this.onStatusChange(status);
         }
     }
 
     /**
-     * Disconnect from WebSocket server
+     * Disconnect from the WebSocket server
      */
     disconnect() {
-        console.log('Disconnecting from WebSocket server');
-        
-        // Clear all timers first
-        this.clearTimers();
-        
-        // Unsubscribe from all leagues
-        this.unsubscribeAll();
-        
-        // Close the socket with normal closure code
         if (this.socket) {
-            this.socket.close(1000, 'User disconnected');
-            this.socket = null;
+            this.socket.close();
         }
-        
+        if (this.pingInterval) {
+            clearInterval(this.pingInterval);
+            this.pingInterval = null;
+        }
+        if (this.reconnectTimeout) {
+            clearTimeout(this.reconnectTimeout);
+            this.reconnectTimeout = null;
+        }
+        if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+        }
         this.status = 'disconnected';
         this.updateStatus('disconnected');
-    }
-
-    /**
-     * Check if WebSocket is currently connected
-     * @returns {boolean} True if connected
-     */
-    isConnected() {
-        return this.socket && this.socket.readyState === WebSocket.OPEN;
-    }
-
-    /**
-     * Get current connection status
-     * @returns {string} Current status
-     */
-    getStatus() {
-        return this.status;
     }
 }
 

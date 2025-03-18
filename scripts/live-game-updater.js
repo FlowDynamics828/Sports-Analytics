@@ -160,6 +160,7 @@ async handleConnectionError(error, retryCount = 0) {
 }
 
   async initializeSystem() {
+    this.logger.info('Initializing Live Game Updater system');
     try {
         // Get port from environment or API configuration
         const API_PORT = process.env.PORT || 4000;
@@ -553,16 +554,26 @@ async start() {
 
     async stop() {
         this.logger.info('Stopping live game updater...');
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
+        try {
+            if (this.updateInterval) {
+                clearInterval(this.updateInterval);
+            }
+            if (this.mongoClient) {
+                await this.mongoClient.close();
+                this.logger.info('MongoDB connection closed');
+            }
+            if (this.wss) {
+                this.wss.close();
+                this.logger.info('WebSocket server closed');
+            }
+            this.logger.info('Live game updater stopped successfully');
+        } catch (error) {
+            this.logger.error('Error during live game updater shutdown:', {
+                error: error.message,
+                stack: error.stack
+            });
+            throw error;
         }
-        if (this.mongoClient) {
-            await this.mongoClient.close();
-        }
-        if (this.wss) {
-            this.wss.close();
-        }
-        this.logger.info('Live game updater stopped');
     }
 }
 

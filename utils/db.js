@@ -1,390 +1,265 @@
-// utils/db.js
+// utils/db.js - Robust MongoDB connection manager
 const { MongoClient } = require('mongodb');
-const { StatsCalculator, TeamStatsTracker } = require('./statsCalculator');
-const _ = require('lodash');
+const winston = require('winston');
 
-// Player stats schema definition
-const playerStatsSchema = {
-  playerId: String,      // Player ID
-  playerName: String,    // Player Name
-  teamId: String,        // Team ID
-  gameId: String,        // Game ID for reference
-  league: String,        // League (NFL, NBA, etc.)
-  date: Date,            // Game date
-  season: String,        // Season identifier
-  
-  // Common stats across sports
-  minutesPlayed: Number,
-  gamesPlayed: Number,
-  
-  // Sport-specific stats stored in a flexible structure
-  stats: {
-    // Basketball stats
-    points: Number,
-    rebounds: Number,
-    assists: Number,
-    steals: Number,
-    blocks: Number,
-    
-    // Football stats
-    passingYards: Number,
-    rushingYards: Number,
-    touchdowns: Number,
-    
-    // Baseball stats
-    hits: Number,
-    runs: Number,
-    rbi: Number,
-    
-    // Soccer stats
-    goals: Number,
-    assists: Number,
-    shots: Number
-  },
-  
-  // Advanced metrics
-  advancedMetrics: {}
-};
+// Configure logger
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        winston.format.simple()
+      )
+    }),
+    new winston.transports.File({ 
+      filename: 'logs/mongodb-error.log',
+      level: 'error'
+    }),
+    new winston.transports.File({ 
+      filename: 'logs/mongodb.log'
+    })
+  ]
+});
 
+// Ensure logs directory exists
+const fs = require('fs');
+const path = require('path');
+if (!fs.existsSync('logs')) {
+  fs.mkdirSync('logs', { recursive: true });
+}
+
+/**
+ * Enterprise-grade MongoDB connection manager with high availability features
+ */
 class DatabaseManager {
-  constructor(config) {
-    this.client = null;
-    this.connecting = false;
-    this.waitingPromises = [];
-    this.config = config;
-    this.mongoUri = config.uri;
-    this.options = {
-      ...config.options,
-      maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
-      minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 10,
-      connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 30000,
-      socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 45000,
-      serverSelectionTimeoutMS: 5000,
-      heartbeatFrequencyMS: 30000, // Reduced for quicker detection
-      maxIdleTimeMS: 60000, // 1 minute idle timeout
-      retryWrites: true,
-      retryReads: true,
-      serverApi: { version: '1', strict: true, deprecationErrors: true }
+  constructor(config = {}) {
+    this.config = {
+      uri: process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics',
+      name: process.env.MONGODB_DB_NAME || 'sports-analytics',
+      options: {
+        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
+        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
+        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 30000,
+        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 45000,
+        serverSelectionTimeoutMS: 15000,
+        heartbeatFrequencyMS: 10000,
+        retryWrites: true,
+        retryReads: true,
+        ...config.options
+      },
+      ...config
     };
     
-    // Make schema available on the instance
-    this.playerStatsSchema = playerStatsSchema;
+    this.client = null;
+    this.db = null;
+    this.connected = false;
+    this.reconnecting = false;
+    this.reconnectAttempts = 0;
+    this.MAX_RECONNECT_ATTEMPTS = 10;
+    this.RECONNECT_INTERVAL = 5000;
+    this.reconnectTimer = null;
+    
+    // Bind event handlers
+    this._handleConnectionClose = this._handleConnectionClose.bind(this);
+    this._handleConnectionError = this._handleConnectionError.bind(this);
   }
-
+  
+  /**
+   * Initialize database connection
+   * @returns {Promise<boolean>} Connection success status
+   */
   async initialize() {
     try {
-      // Connect to database
-      await this.connect();
-      
-      // Perform any additional initialization
-      const db = this.client.db(this.config.name);
-      
-      // Create any necessary indexes or collections for existing data
-      await db.collection('users').createIndex({ email: 1 }, { unique: true });
-      await db.collection('games').createIndex({ date: 1 });
-      await db.collection('stats').createIndex({ teamId: 1 });
-      
-      // Add player stats collections and indexes for each league
-      const SUPPORTED_LEAGUES = [
-        'NFL', 'NBA', 'MLB', 'NHL',
-        'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
-      ];
-      
-      for (const league of SUPPORTED_LEAGUES) {
-        const collectionName = `${league.toLowerCase()}_player_stats`;
-        
-        try {
-          // Create collection if it doesn't exist
-          await db.createCollection(collectionName);
-          console.log(`Created ${collectionName} collection`);
-        } catch (error) {
-          // Collection may already exist, which is fine
-          if (error.code !== 48) { // 48 is "NamespaceExists" error
-            console.warn(`Warning creating ${collectionName}: ${error.message}`);
-          }
-        }
-        
-        // Create indexes for player stats collection
-        await db.collection(collectionName).createIndex({ playerId: 1 });
-        await db.collection(collectionName).createIndex({ gameId: 1 });
-        await db.collection(collectionName).createIndex({ teamId: 1 });
-        await db.collection(collectionName).createIndex({ date: -1 });
-        await db.collection(collectionName).createIndex({ 
-          playerId: 1, 
-          date: -1 
-        }, { name: "player_date_lookup" });
-        
-        console.log(`Created indexes for ${collectionName}`);
+      if (this.client && this.connected) {
+        logger.info('Database already connected');
+        return true;
       }
       
+      // Create MongoDB client
+      this.client = new MongoClient(this.config.uri, this.config.options);
+      
+      // Connect to MongoDB
+      await this.client.connect();
+      this.db = this.client.db(this.config.name);
+      
+      // Test connection
+      await this.db.command({ ping: 1 });
+      
+      // Register event handlers
+      this.client.on('close', this._handleConnectionClose);
+      this.client.on('error', this._handleConnectionError);
+      
+      this.connected = true;
+      this.reconnectAttempts = 0;
+      
+      logger.info('MongoDB connection established successfully');
       return true;
     } catch (error) {
-      throw new Error(`Database initialization failed: ${error.message}`);
+      logger.error(`MongoDB connection failed: ${error.message}`);
+      this.connected = false;
+      
+      // Initial connection failed, try to reconnect
+      this._scheduleReconnect();
+      return false;
     }
   }
-
-  async connect() {
-    if (this.connecting) {
-      return new Promise((resolve, reject) => {
-        this.waitingPromises.push({ resolve, reject });
-      });
+  
+  /**
+   * Schedule reconnection attempt with exponential backoff
+   * @private
+   */
+  _scheduleReconnect() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
     }
-
-    this.connecting = true;
-    try {
-      this.client = await MongoClient.connect(this.mongoUri, this.options);
-      this.waitingPromises.forEach(promise => promise.resolve(this.client));
-      return this.client;
-    } catch (error) {
-      this.waitingPromises.forEach(promise => promise.reject(error));
-      throw error;
-    } finally {
-      this.connecting = false;
-      this.waitingPromises = [];
+    
+    if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      logger.error(`Maximum reconnection attempts (${this.MAX_RECONNECT_ATTEMPTS}) exceeded`);
+      return;
+    }
+    
+    this.reconnecting = true;
+    const delay = Math.min(this.RECONNECT_INTERVAL * Math.pow(1.5, this.reconnectAttempts), 60000);
+    this.reconnectAttempts++;
+    
+    logger.info(`Scheduling reconnection attempt ${this.reconnectAttempts} in ${delay}ms`);
+    
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        logger.info(`Attempting to reconnect (attempt ${this.reconnectAttempts})`);
+        await this.initialize();
+      } catch (error) {
+        logger.error(`Reconnection attempt ${this.reconnectAttempts} failed: ${error.message}`);
+        this._scheduleReconnect();
+      }
+    }, delay);
+  }
+  
+  /**
+   * Handle connection close event
+   * @private
+   */
+  _handleConnectionClose() {
+    logger.warn('MongoDB connection closed unexpectedly');
+    this.connected = false;
+    if (!this.reconnecting) {
+      this._scheduleReconnect();
     }
   }
-
-  async disconnect() {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
+  
+  /**
+   * Handle connection error event
+   * @param {Error} error - Connection error
+   * @private
+   */
+  _handleConnectionError(error) {
+    logger.error(`MongoDB connection error: ${error.message}`);
+    this.connected = false;
+    if (!this.reconnecting) {
+      this._scheduleReconnect();
     }
   }
-
-  async getActiveConnections() {
-    if (!this.client) return 0;
-    const serverStatus = await this.client.db('admin').command({ serverStatus: 1 });
-    return serverStatus.connections.current;
+  
+  /**
+   * Check if database is connected
+   * @returns {boolean} Connection status
+   */
+  isConnected() {
+    return this.connected && this.client !== null;
   }
-
+  
+  /**
+   * Perform health check
+   * @returns {Promise<Object>} Health status
+   */
   async healthCheck() {
     try {
-      if (!this.client) {
-        await this.connect();
+      if (!this.client || !this.connected) {
+        return { status: 'disconnected' };
       }
-      await this.client.db('admin').command({ ping: 1 });
+      
+      await this.db.command({ ping: 1 });
+      const status = this.client.topology.s.state;
+      
       return {
-        status: 'healthy',
-        connections: await this.getActiveConnections()
+        status: 'connected',
+        details: {
+          state: status,
+          poolSize: this.client.topology.s.pool ? this.client.topology.s.pool.size : 'N/A'
+        }
       };
     } catch (error) {
-      return {
-        status: 'unhealthy',
+      logger.error(`Health check failed: ${error.message}`);
+      return { 
+        status: 'error',
         error: error.message
       };
     }
   }
-
-  async find(collection, query = {}, options = {}) {
-    await this.connect();
-    return this.client.db(this.config.name)
-      .collection(collection)
-      .find(query, options)
-      .toArray();
-  }
-
-  async findOne(collection, query = {}, options = {}) {
-    await this.connect();
-    return this.client.db(this.config.name)
-      .collection(collection)
-      .findOne(query, options);
-  }
-
-  async insertOne(collection, document) {
-    await this.connect();
-    return this.client.db(this.config.name)
-      .collection(collection)
-      .insertOne(document);
-  }
-
-  async updateOne(collection, filter, update, options = {}) {
-    await this.connect();
-    return this.client.db(this.config.name)
-      .collection(collection)
-      .updateOne(filter, update, options);
-  }
-
-  // Player stats specific methods
-  async savePlayerStats(league, playerStats) {
-    await this.connect();
-    const collectionName = `${league.toLowerCase()}_player_stats`;
-    
-    // Validate stats against schema
-    const validatedStats = this._validateAgainstSchema(playerStats);
-    
-    return this.client.db(this.config.name)
-      .collection(collectionName)
-      .insertOne(validatedStats);
-  }
   
-  async getPlayerStats(league, playerId, options = {}) {
-    await this.connect();
-    const collectionName = `${league.toLowerCase()}_player_stats`;
-    
-    const query = { playerId };
-    if (options.gameId) query.gameId = options.gameId;
-    if (options.season) query.season = options.season;
-    if (options.dateRange) {
-      query.date = {
-        $gte: options.dateRange.start,
-        $lte: options.dateRange.end
-      };
-    }
-    
-    const sort = options.sort || { date: -1 };
-    const limit = options.limit || 0;
-    
-    return this.client.db(this.config.name)
-      .collection(collectionName)
-      .find(query)
-      .sort(sort)
-      .limit(limit)
-      .toArray();
-  }
-  
-  async updatePlayerStats(league, playerId, gameId, updates) {
-    await this.connect();
-    const collectionName = `${league.toLowerCase()}_player_stats`;
-    
-    // Ensure updates only contain valid fields
-    const validUpdates = {};
-    for (const field in updates) {
-      if (field in this.playerStatsSchema) {
-        if (field === 'stats' || field === 'advancedMetrics') {
-          validUpdates[field] = {};
-          for (const statField in updates[field]) {
-            if (statField in this.playerStatsSchema[field]) {
-              validUpdates[field][statField] = updates[field][statField];
-            }
-          }
-        } else {
-          validUpdates[field] = updates[field];
-        }
-      }
-    }
-    
-    return this.client.db(this.config.name)
-      .collection(collectionName)
-      .updateOne(
-        { playerId, gameId },
-        { $set: validUpdates }
-      );
-  }
-  
-  _validateAgainstSchema(playerStats) {
-    // Create a new object with only fields from the schema
-    const validated = {};
-    
-    for (const field in this.playerStatsSchema) {
-      if (playerStats.hasOwnProperty(field)) {
-        if (field === 'stats' || field === 'advancedMetrics') {
-          // Handle nested objects
-          validated[field] = {};
-          for (const statField in this.playerStatsSchema[field]) {
-            if (playerStats[field] && playerStats[field].hasOwnProperty(statField)) {
-              validated[field][statField] = playerStats[field][statField];
-            }
-          }
-        } else {
-          validated[field] = playerStats[field];
-        }
-      }
-    }
-    
-    return validated;
-  }
-
-  async getTeamStats(teamId) {
-    const games = await this.find('games', { 
-      $or: [
-        { 'homeTeam.id': teamId },
-        { 'awayTeam.id': teamId }
-      ],
-      status: 'completed'
-    });
-
-    return await StatsCalculator.calculateTeamStats(
-      this.client,
-      this.config.name,
-      teamId,
-      games
-    );
-  }
-
-  async calculateLeagueAverages(league, startDate, endDate) {
-    try {
-      const games = await this.find('games', {
-        league: league.toUpperCase(),
-        status: 'completed',
-        date: { $gte: startDate, $lte: endDate }
-      });
-
-      if (!games.length) return null;
-
-      const scores = _.flatMap(games, game => [
-        game.homeTeam.score, 
-        game.awayTeam.score
-      ]);
-
-      return {
-        averageScore: _.mean(scores).toFixed(1),
-        medianScore: this.calculateMedian(scores),
-        highestScore: _.max(scores),
-        lowestScore: _.min(scores),
-        scoreStandardDeviation: this.calculateStandardDeviation(scores),
-        totalGamesAnalyzed: games.length,
-        scoringTrends: StatsCalculator.calculateScoringTrends(games)
-      };
-    } catch (error) {
-      console.error('League averages calculation error:', error);
+  /**
+   * Get database instance
+   * @returns {Object|null} MongoDB database instance 
+   */
+  getDb() {
+    if (!this.connected || !this.db) {
+      logger.warn('Attempted to get database instance while disconnected');
       return null;
     }
+    
+    return this.db;
   }
-
-  calculateRecentForm(games, teamId) {
-    const recentGames = games.slice(-5);
-    if (recentGames.length === 0) return 0.5;
-
-    let wins = 0;
-    recentGames.forEach(game => {
-      const isHome = game.homeTeam.id === teamId;
-      const teamScore = isHome ? game.homeTeam.score : game.awayTeam.score;
-      const opposingScore = isHome ? game.awayTeam.score : game.homeTeam.score;
-      if (teamScore > opposingScore) wins++;
-    });
-
-    return wins / recentGames.length;
-  }
-
-  calculateScoringEfficiency(games, teamId) {
-    if (games.length === 0) return 0.5;
-
-    let totalEfficiency = 0;
-    games.forEach(game => {
-      const isHome = game.homeTeam.id === teamId;
-      const teamScore = isHome ? game.homeTeam.score : game.awayTeam.score;
-      const opposingScore = isHome ? game.awayTeam.score : game.homeTeam.score;
-      totalEfficiency += teamScore / (teamScore + opposingScore);
-    });
-
-    return totalEfficiency / games.length;
-  }
-
-  calculateMedian(values) {
-    const sorted = _.sortBy(values);
-    const mid = Math.floor(sorted.length / 2);
-    return sorted.length % 2 === 0
-      ? (sorted[mid - 1] + sorted[mid]) / 2
-      : sorted[mid];
-  }
-
-  calculateStandardDeviation(values) {
-    const mean = _.mean(values);
-    const squaredDiffs = values.map(v => Math.pow(v - mean, 2));
-    const variance = _.mean(squaredDiffs);
-    return Math.sqrt(variance);
+  
+  /**
+   * Close database connection
+   * @returns {Promise<boolean>} Close success status
+   */
+  async close() {
+    try {
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      
+      if (this.client) {
+        await this.client.close();
+        this.client = null;
+        this.db = null;
+      }
+      
+      this.connected = false;
+      this.reconnecting = false;
+      
+      logger.info('MongoDB connection closed successfully');
+      return true;
+    } catch (error) {
+      logger.error(`Error closing MongoDB connection: ${error.message}`);
+      return false;
+    }
   }
 }
 
-// Export the DatabaseManager class and the player stats schema
-module.exports = { DatabaseManager, playerStatsSchema };
+// Singleton instance
+let instance = null;
+
+/**
+ * Get DatabaseManager instance
+ * @param {Object} config - Optional configuration
+ * @returns {DatabaseManager} Database manager instance
+ */
+function getDatabaseManager(config = {}) {
+  if (!instance) {
+    instance = new DatabaseManager(config);
+  }
+  return instance;
+}
+
+module.exports = {
+  DatabaseManager,
+  getDatabaseManager
+};

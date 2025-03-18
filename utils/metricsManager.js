@@ -11,6 +11,24 @@ const v8 = require('v8');
 const crypto = require('crypto');
 const winston = require('winston');
 const DailyRotateFile = require('winston-daily-rotate-file');
+const prometheus = require('prom-client');
+const redis = require('./redisManager');
+
+const collectDefaultMetrics = prometheus.collectDefaultMetrics;
+collectDefaultMetrics({ timeout: 5000 });
+
+const redisConnectionGauge = new prometheus.Gauge({
+    name: 'redis_connections',
+    help: 'Number of active Redis connections'
+});
+
+redis.on('connect', () => {
+    redisConnectionGauge.inc();
+});
+
+redis.on('end', () => {
+    redisConnectionGauge.dec();
+});
 
 class MetricsManager extends EventEmitter {
   // Use a WeakMap or Map to track instances temporarily for parallel initialization

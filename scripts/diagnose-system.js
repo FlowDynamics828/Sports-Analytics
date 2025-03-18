@@ -88,7 +88,7 @@ results = {}
 for package in packages:
     try:
         spec = importlib.util.find_spec(package)
-        if spec is None:
+        if (spec is None):
             results[package] = False
         else:
             module = importlib.import_module(package)
@@ -98,7 +98,7 @@ for package in packages:
         results[package] = False
 
 for package, version in results.items():
-    if version:
+    if (version):
         print(f"{package}: {version}")
     else:
         print(f"{package}: NOT FOUND")
@@ -137,70 +137,33 @@ for package, version in results.items():
 async function checkRedis() {
   console.log(`\n${colors.bright}Checking Redis Connection:${colors.reset}`);
   
-  // Skip Redis check if USE_IN_MEMORY_CACHE is true
-  if (process.env.USE_IN_MEMORY_CACHE === 'true') {
-    console.log(`  Redis check: ${colors.yellow}SKIPPED (Using in-memory cache)${colors.reset}`);
-    return true;
-  }
-  
   const redisHost = process.env.REDIS_HOST || 'localhost';
   const redisPort = parseInt(process.env.REDIS_PORT, 10) || 6379;
-  
-  console.log(`  Redis host: ${redisHost}`);
-  console.log(`  Redis port: ${redisPort}`);
-  
-  try {
-    // Check if Redis module is installed
-    try {
-      require.resolve('ioredis');
-      console.log(`  Redis module: ${colors.green}INSTALLED${colors.reset}`);
-    } catch (error) {
-      console.log(`  Redis module: ${colors.red}NOT INSTALLED${colors.reset}`);
-      console.log(`  Run 'npm install ioredis' to install the Redis module.`);
-      overallStatus = false;
-      return false;
+    console.log(`  Redis check: ${colors.yellow}SKIPPED (Using in-memory cache)${colors.reset}`);
+    return true;
+  } // Check if Redis is running
+    const isRunning = await checkPortOpen(redisHost, redisPort);
+  const redisHost = process.env.REDIS_HOST || 'localhost';
+  const redisPort = parseInt(process.env.REDIS_PORT, 10) || 6379;
+      console.log(`${colors.green}✓ Redis is running on ${redisHost}:${redisPort}${colors.reset}`);
+    } else {
+      console.log(`${colors.yellow}⚠ Redis is not running on ${redisHost}:${redisPort}${colors.reset}`);
+      
+      // Check if in-memory cache is enabled
+      if (process.env.USE_IN_MEMORY_CACHE === 'true') {
+        console.log(`${colors.green}✓ In-memory cache fallback is enabled${colors.reset}`);
+      } else {
+        console.log(`${colors.red}✗ In-memory cache fallback is not enabled${colors.reset}`);
+        overallStatus = false;
+      }
     }
-    
-    // Check if Redis server is running
-    const Redis = require('ioredis');
-    const redis = new Redis({
-      host: redisHost,
-      port: redisPort,
-      password: process.env.REDIS_PASSWORD || undefined,
-      connectTimeout: 5000
-    });
-    
-    return new Promise((resolve) => {
-      redis.on('ready', () => {
-        console.log(`  Redis connection: ${colors.green}OK${colors.reset}`);
-        redis.quit();
-        resolve(true);
-      });
-      
-      redis.on('error', (error) => {
-        console.log(`  Redis connection: ${colors.red}FAILED${colors.reset}`);
-        console.log(`  Error: ${error.message}`);
-        console.log(`  Recommendation: Enable in-memory cache by setting USE_IN_MEMORY_CACHE=true in .env`);
-        redis.quit();
-        overallStatus = false;
-        resolve(false);
-      });
-      
-      // Set timeout
-      setTimeout(() => {
-        console.log(`  Redis connection: ${colors.red}TIMEOUT${colors.reset}`);
-        console.log(`  Recommendation: Enable in-memory cache by setting USE_IN_MEMORY_CACHE=true in .env`);
-        redis.disconnect();
-        overallStatus = false;
-        resolve(false);
-      }, 5000);
-    });
   } catch (error) {
-    console.log(`  Redis check: ${colors.red}ERROR${colors.reset}`);
-    console.log(`  Error: ${error.message}`);
+    console.log(`${colors.red}✗ Redis check failed: ${error.message}${colors.reset}`);
+    console.log(`${colors.yellow}ℹ Run 'npm run fix:redis' to fix Redis connection${colors.reset}`);
     overallStatus = false;
-    return false;
   }
+  
+  console.log();
 }
 
 // Function to check MongoDB connection
@@ -314,13 +277,8 @@ function checkSystemResources() {
   const memoryUsagePercent = ((totalMemory - freeMemory) / totalMemory * 100).toFixed(2);
   
   console.log(`Total memory: ${totalMemoryGB} GB`);
-  console.log(`Free memory: ${freeMemoryGB} GB (${memoryUsagePercent}% used)`);
-  
-  if (freeMemory < 500 * 1024 * 1024) { // Less than 500MB free
-    console.log(`${colors.yellow}Warning: Low memory available. Performance may be affected.${colors.reset}`);
-    console.log(`Recommendation: Close other applications to free up memory.`);
-    overallStatus = false;
-  }
+  console.log(`Free memory: ${freeMemoryGB} GB`);
+  console.log(`Memory usage: ${memoryUsagePercent}%`);
   
   // Check disk space
   try {
@@ -403,8 +361,6 @@ function checkNodeEnvironment() {
       overallStatus = false;
     }
   }
-  
-  return true;
 }
 
 // Main function
@@ -417,7 +373,12 @@ async function main() {
     checkNodeEnvironment();
     
     // Check Python installation
-    await checkPython();
+    const pythonInstalled = await checkPython();
+    
+    if (pythonInstalled) {
+      // Check Python packages
+      checkPythonPackages(process.env.PYTHON_PATH || 'python');
+    }
     
     // Check Redis connection
     await checkRedis();

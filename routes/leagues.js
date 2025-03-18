@@ -471,7 +471,7 @@ router.get('/subscription',
                 features: await getAvailableFeatures(details.tier)
             };
 
-           res.json({
+            res.json({
                 success: true,
                 data: enhancedDetails,
                 metadata: {

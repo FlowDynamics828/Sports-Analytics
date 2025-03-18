@@ -61,12 +61,50 @@
         // Cache DOM elements
         cacheElements();
 
-        // Initialize the dashboard
-        initDashboard();
+        // Verify authentication before initializing the dashboard
+        verifyAuthentication().then(isAuthenticated => {
+            if (isAuthenticated) {
+                // Initialize the dashboard
+                initDashboard();
 
-        // Set up event listeners
-        setupEventListeners();
+                // Set up event listeners
+                setupEventListeners();
+            } else {
+                window.location.href = '/login';
+            }
+        });
     });
+
+    /**
+     * Verify authentication token
+     * @returns {Promise<boolean>} - Returns true if authenticated, false otherwise
+     */
+    async function verifyAuthentication() {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            console.log('No authentication token found, redirecting to login');
+            return false;
+        }
+
+        try {
+            const response = await fetch('/api/auth/verify', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error('Invalid token');
+            }
+
+            console.log('Authentication verified successfully');
+            return true;
+        } catch (error) {
+            console.error('Authentication verification failed:', error);
+            localStorage.clear();
+            return false;
+        }
+    }
 
     /**
      * Cache frequently accessed DOM elements for better performance

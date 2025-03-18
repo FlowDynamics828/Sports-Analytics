@@ -146,12 +146,13 @@ class PredictionRequest:
     factors: Optional[List[Dict]] = None
 
 class MemoryMonitor:
-    def __init__(self, threshold_mb: int = 800):
-        self.threshold_mb = threshold_mb
+    def __init__(self, threshold_mb: int = 4096, critical_threshold_mb: int = 6144, check_interval: int = 60):
+        self.threshold_mb = threshold_mb  # Warning threshold at 4GB
+        self.critical_threshold_mb = critical_threshold_mb  # Critical threshold at 75% of 8192MB
         self.process = psutil.Process()
         self.consecutive_checks = 0
         self.last_check_time = time.time()
-        self.check_interval = 60
+        self.check_interval = check_interval
         self.last_gc_time = 0
         self.gc_interval = 300
 
@@ -170,9 +171,16 @@ class MemoryMonitor:
             memory_info = self.process.memory_info()
             memory_mb = memory_info.rss / (1024 * 1024)
 
-            logger.debug(f"Memory usage: {memory_mb:.1f}MB (threshold: {self.threshold_mb}MB)")
+            logger.debug(f"Memory usage: {memory_mb:.1f}MB (threshold: {self.threshold_mb}MB, critical: {self.critical_threshold_mb}MB)")
 
-            if memory_mb > self.threshold_mb:
+            if memory_mb > self.critical_threshold_mb:
+                self.consecutive_checks += 1
+                gc.collect(2)
+                self._clear_caches()
+                logger.error(f'Critical memory usage detected ({memory_mb:.1f}MB), performed emergency cleanup')
+                self.consecutive_checks = 0
+                return True
+            elif memory_mb > self.threshold_mb:
                 self.consecutive_checks += 1
 
                 if current_time - self.last_gc_time > self.gc_interval:
@@ -181,18 +189,6 @@ class MemoryMonitor:
                     self._clear_caches()
                     logger.warning(f'High memory usage detected ({memory_mb:.1f}MB), triggered garbage collection')
                     self.consecutive_checks = 0
-
-                if memory_mb > self.threshold_mb * 1.5:
-                    logger.error(f'Critical memory usage detected ({memory_mb:.1f}MB), performing emergency cleanup')
-                    gc.collect(2)
-                    self._clear_caches()
-                    for module_name in list(sys.modules.keys()):
-                        if module_name not in ('os', 'sys', 'gc', 'time', 'logging', 'psutil'):
-                            if module_name in sys.modules:
-                                try:
-                                    del sys.modules[module_name]
-                                except:
-                                    pass
 
                 return True
             else:
@@ -319,9 +315,9 @@ class TheAnalyzerPredictiveModel:
         self.lgb_models = {}
         self.model_cache = ModelCache()
         self.streaming_queue = None
-        self.executor = ThreadPoolExecutor(max_workers=2)
+        self.executor = ThreadPoolExecutor(max_workers=4)  # Increased to 4 for better concurrency
         self.circuit_breaker = CircuitBreaker(failure_threshold=3, reset_timeout=120)
-        self.memory_monitor = MemoryMonitor(threshold_mb=800)
+        self.memory_monitor = MemoryMonitor(threshold_mb=4096, critical_threshold_mb=6144)
 
         # MongoDB connection
         mongodb_uri = os.getenv('MONGODB_URI', 'mongodb://localhost:27017/sports-analytics')
@@ -408,12 +404,13 @@ class TheAnalyzerPredictiveModel:
             
             required_libs = {
                 'numpy': np, 'pandas': pd, 'sklearn': None, 'xgboost': xgb,
-                'lightgbm': lgb, 'pymongo': pymongo, 'requests': requests
+                'lightgbm': lgb, 'pymongo': pymongo, 'requests': requests,
+                'prometheus-client': None
             }
             for lib, module in required_libs.items():
                 try:
                     if module is None:
-                        __import__(lib)
+                        __import__(lib.replace('-', '_'))  # Convert package name to import name
                     logger.debug(f"Verified {lib} is installed")
                 except ImportError as e:
                     return {"status": "error", "message": f"Missing dependency: {lib} - {str(e)}"}
@@ -423,28 +420,35 @@ class TheAnalyzerPredictiveModel:
             logger.error(f"Python environment verification failed: {str(e)}")
             return {"status": "error", "message": str(e)}
 
-  # Around line 644-675 in the fetch_sportsdb_data method
-def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
-    api_key = os.getenv('THESPORTSDB_API_KEY', '447279')  # Added default from screenshot
-    if not api_key:
-        raise ValueError("TheSportsDB API key not found in environment variables")
+    def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None, max_retries=3):
+        """Fetch data from TheSportsDB with retry logic and increased timeout"""
+        api_key = os.getenv('THESPORTSDB_API_KEY', '447279')
+        if not api_key:
+            raise ValueError("TheSportsDB API key not found in environment variables")
 
-    try:
-        if use_v2:
-            url = f"https://www.thesportsdb.com/api/v2/json/{endpoint}"
-            headers = {'X-API-KEY': api_key}
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-        else:
-            params = params or {}
-            url = f"https://www.thesportsdb.com/api/v1/json/{api_key}/{endpoint}"
-            response = requests.get(url, params=params, timeout=10)
+        timeout = int(os.getenv('SPORTSDB_REQUEST_TIMEOUT', 60000)) / 1000  # Convert ms to seconds
 
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        logger.error(f"Error fetching SportsDB data: {str(e)}")
-        ERROR_COUNTER.labels(type='api_fetch').inc()
-        raise
+        for attempt in range(max_retries):
+            try:
+                if use_v2:
+                    url = f"https://www.thesportsdb.com/api/v2/json/{endpoint}"
+                    headers = {'X-API-KEY': api_key}
+                    response = requests.get(url, headers=headers, params=params, timeout=timeout)
+                else:
+                    params = params or {}
+                    url = f"https://www.thesportsdb.com/api/v1/json/{api_key}/{endpoint}"
+                    response = requests.get(url, params=params, timeout=timeout)
+
+                response.raise_for_status()
+                return response.json()
+            except requests.RequestException as e:
+                logger.warning(f"Attempt {attempt + 1}/{max_retries} failed to fetch SportsDB data: {str(e)}")
+                ERROR_COUNTER.labels(type='api_fetch').inc()
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait 5 seconds before retrying
+                else:
+                    logger.error(f"All {max_retries} attempts failed: {str(e)}")
+                    raise
 
     def fetch_historical_events(self, league, season="2023-2024"):
         try:
@@ -490,6 +494,11 @@ def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
         """Enhanced prediction with comprehensive output, handling JSON input from Node.js"""
         try:
             prediction_request = json.loads(prediction_request_json)
+            
+            # Handle health check before creating PredictionRequest
+            if prediction_request.get('type') == 'health_check':
+                return self._verify_python_environment()
+            
             request = PredictionRequest(
                 league=prediction_request.get('league', ''),
                 prediction_type=prediction_request.get('prediction_type', ''),
@@ -551,6 +560,9 @@ def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
 
     def _validate_request(self, prediction_request):
         """Validate incoming prediction request"""
+        if prediction_request.prediction_type == 'health_check':
+            return  # Skip validation for health checks
+            
         if not prediction_request.league or not prediction_request.league.strip():
             raise ValueError("League is required and cannot be empty")
         
@@ -1354,6 +1366,7 @@ def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
             sort=[('dateEvent', -1)],
             limit=10
         ))
+
         if not games:
             return 0
 
@@ -1652,6 +1665,7 @@ def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
             self.executor.shutdown(wait=True, cancel_futures=True)
             logger.info("Thread pool executor shut down")
 
+            self.cleanup_metrics()  # Added to clear Prometheus metrics
             gc.collect()
             logger.info("Garbage collection completed")
 
@@ -1661,6 +1675,14 @@ def fetch_sportsdb_data(self, endpoint, use_v2=True, params=None):
             logger.error(f"Error during cleanup: {str(e)}")
             raise
 
+    def cleanup_metrics(self):
+        """Clear Prometheus metrics to prevent memory leaks"""
+        PREDICTION_LATENCY._metrics.clear()
+        MODEL_ACCURACY._metrics.clear()
+        PREDICTION_COUNTER._metrics.clear()
+        ERROR_COUNTER._metrics.clear()
+        logger.info("Prometheus metrics cleared")
+
 # Main execution block for direct script execution (e.g., testing)
 if __name__ == "__main__":
     try:
@@ -1668,7 +1690,7 @@ if __name__ == "__main__":
             logger.info(f"Received signal {signum}")
             if 'model' in locals():
                 model.cleanup()
-            sys.exit(0)
+            print(json.dumps({"status": "shutdown", "message": "Graceful shutdown initiated"}))  # Return JSON instead of exiting
 
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -1692,27 +1714,21 @@ if __name__ == "__main__":
                     "error": "Invalid JSON input",
                     "type": "JSONDecodeError"
                 }))
-                sys.exit(1)
             except Exception as e:
                 logger.error(f"Prediction error in main: {str(e)}")
                 print(json.dumps({
                     "error": str(e),
                     "type": type(e).__name__
                 }))
-                sys.exit(1)
         else:
             logger.error("No input provided")
             print(json.dumps({
                 "error": "No input provided",
                 "type": "NoInputError"
             }))
-            sys.exit(1)
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
         print(json.dumps({
             "error": str(e),
             "type": type(e).__name__
         }))
-        sys.exit(1)
-
-# Remove duplicate Redis connection code

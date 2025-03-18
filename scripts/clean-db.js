@@ -1,4 +1,3 @@
-// scripts/clean-db.js
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const readline = require('readline');

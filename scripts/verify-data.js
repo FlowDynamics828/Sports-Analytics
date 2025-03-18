@@ -985,3 +985,28 @@ if (require.main === module) {
     verificationResults
   };
 }
+
+const { MongoClient } = require('mongodb');
+
+async function verifyData() {
+    const client = new MongoClient(MONGODB_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    try {
+        await client.connect();
+        const db = client.db(DB_NAME);
+        
+        const teams = await db.collection('teams').find().toArray();
+        console.log('Teams:', teams);
+        
+        const players = await db.collection('players').find().toArray();
+        console.log('Players:', players);
+        
+        const games = await db.collection('games').find().toArray();
+        console.log('Games:', games);
+    } catch (error) {
+        console.error('Error verifying data:', error);
+    } finally {
+        await client.close();
+    }
+}
+
+verifyData();

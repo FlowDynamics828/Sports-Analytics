@@ -7,7 +7,7 @@ class LiveUpdates {
 
     setupWebSocket() {
         const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        this.ws = new WebSocket(`${wsProtocol}//${window.location.host}`);
+        this.ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
 
         this.ws.onopen = () => this.handleConnection(true);
         this.ws.onclose = () => this.handleConnection(false);

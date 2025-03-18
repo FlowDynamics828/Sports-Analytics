@@ -360,6 +360,18 @@ const calculatePerformanceMetrics = async function(games, teamId) {
     };
 };
 
+class BaseCalculations {
+    static calculateAverage(values) {
+        if (!values.length) return 0;
+        const sum = values.reduce((acc, val) => acc + val, 0);
+        return sum / values.length;
+    }
+
+    static calculateSum(values) {
+        return values.reduce((acc, val) => acc + val, 0);
+    }
+}
+
 module.exports = {
     calculateBaseStats,
     filterTeamGames,
@@ -379,5 +391,6 @@ module.exports = {
     calculateOpponentSplits,
     calculateTrends,
     calculateHistoricalContext,
-    calculatePerformanceMetrics
+    calculatePerformanceMetrics,
+    BaseCalculations
 };

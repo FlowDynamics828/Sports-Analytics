@@ -20,6 +20,7 @@ const metrics = MetricsManager.getInstance();
 const breaker = new CircuitBreaker();
 const rateLimiter = new RateLimiterCluster();
 const subscriptionManager = SubscriptionManager.getInstance();
+const securityManager = new SecurityManager(); // Ensure SecurityManager is initialized
 
 // Comprehensive AuthMiddleware factory with enhanced security features
 const AuthMiddlewareFactory = {
@@ -1223,7 +1224,16 @@ class AuthSystemError extends AuthError {
 module.exports = {
     authenticate,
     requireAuth,
-    requireAdmin
+    requireAdmin,
+    AuthError,
+    SecurityViolationError,
+    AuthInitializationError,
+    DatabaseConnectionError,
+    DatabaseInitializationError,
+    SessionError,
+    DatabaseError,
+    SecurityCheckError,
+    AuthSystemError
 };
 
 process.on('SIGTERM', async () => {

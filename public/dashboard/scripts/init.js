@@ -12,7 +12,7 @@ async function verifyServices() {
 }
 
 import { DashboardManager } from './dashboard.js';
-import { ChartManager } from './charts.js';
+import ChartManager from './charts.js';
 import { PredictionManager } from './predictions.js';
 import { AuthManager } from './auth.js';
 import { WebSocketClient } from './websocket.js';
@@ -172,11 +172,16 @@ class SystemInitializer {
 
         // Error handling
         window.addEventListener('error', this.handleGlobalError.bind(this));
-        window.addEventListener('unhandledrejection', this.handleUnhandledRejection.bind(this));
+        (window as any).addEventListener('unhandledrejection', this.handleUnhandledRejection.bind(this));
 
         // Custom events
         document.addEventListener('dataRefresh', this.handleDataRefresh.bind(this));
         document.addEventListener('userAction', this.handleUserAction.bind(this));
+    }
+
+    handleDataRefresh() {
+        console.log('Data refresh event triggered');
+        // Add your data refresh logic here
     }
 
     startMonitoring() {
@@ -189,6 +194,16 @@ class SystemInitializer {
 
         // Initialize system monitoring
         this.initializeMonitoring();
+    }
+
+    handleUnhandledRejection(event) {
+        console.error('Unhandled promise rejection:', event.reason);
+        this.showErrorMessage({
+            title: 'Unhandled Error',
+            message: 'An unexpected error occurred. Please try again later.',
+            error: event.reason,
+            retry: false
+        });
     }
 
     handleInitializationError(error) {

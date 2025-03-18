@@ -169,7 +169,7 @@ class SportsAnalyticsDashboard {
             this.managers.websocket.onStatusChange = this.handleConnectionChange.bind(this);
             
             // Connect to WebSocket server
-            await this.managers.websocket.connect();
+            await this.managers.websocket.connect('wss://new-websocket-url.com');
             console.log('WebSocket connection initialized');
         } catch (error) {
             console.error('WebSocket initialization failed:', error);

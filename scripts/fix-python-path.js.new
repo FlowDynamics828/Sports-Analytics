@@ -54,19 +54,6 @@ async function detectPythonPath() {
       'C:\\Python310\\python.exe',
       'C:\\Python311\\python.exe',
       'C:\\Python312\\python.exe',
-      'C:\\Program Files\\Python39\\python.exe',
-      'C:\\Program Files\\Python310\\python.exe',
-      'C:\\Program Files\\Python311\\python.exe',
-      'C:\\Program Files\\Python312\\python.exe',
-      'C:\\Program Files (x86)\\Python39\\python.exe',
-      'C:\\Program Files (x86)\\Python310\\python.exe',
-      'C:\\Program Files (x86)\\Python311\\python.exe',
-      'C:\\Program Files (x86)\\Python312\\python.exe',
-      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python39\\python.exe`,
-      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python310\\python.exe`,
-      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python311\\python.exe`,
-      `${process.env.USERPROFILE}\\AppData\\Local\\Programs\\Python\\Python312\\python.exe`,
-      'C:\\ProgramData\\Anaconda3\\python.exe',
       'C:\\ProgramData\\miniconda3\\python.exe',
       'C:\\Windows\\py.exe'
     ];
@@ -262,122 +249,6 @@ async function updateEnvFile(pythonPath) {
   }
 }
 
-// Function to check if predictive_model.py exists
-function checkPredictiveModelScript() {
-  console.log(`\n${colors.bright}Checking Predictive Model Script:${colors.reset}`);
-  
-  const scriptPaths = [
-    path.join(process.cwd(), 'scripts', 'predictive_model.py'),
-    path.join(process.cwd(), 'predictive_model.py'),
-    path.join(process.cwd(), 'service', 'predictive_model.py'),
-    path.join(process.cwd(), 'service', 'predictive-model.py'),
-    path.join(process.cwd(), 'scripts', 'predictive-model.py')
-  ];
-  
-  let foundPath = null;
-  
-  for (const scriptPath of scriptPaths) {
-    const exists = fs.existsSync(scriptPath);
-    console.log(`  ${scriptPath}: ${exists ? `${colors.green}EXISTS${colors.reset}` : `${colors.red}MISSING${colors.reset}`}`);
-    
-    if (exists) {
-      foundPath = scriptPath;
-    }
-  }
-  
-  if (!foundPath) {
-    console.log(`\n  ${colors.yellow}Warning: Could not find predictive_model.py in any of the expected locations.${colors.reset}`);
-    console.log(`  ${colors.yellow}You may need to create this file or check your project structure.${colors.reset}`);
-    return null;
-  }
-  
-  return foundPath;
-}
-
-// Function to create predictive_model.py if it doesn't exist
-function createPredictiveModelScript(scriptPath) {
-  console.log(`\n${colors.bright}Creating Predictive Model Script:${colors.reset}`);
-  
-  try {
-    // Create directory if it doesn't exist
-    const dir = path.dirname(scriptPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    
-    // Basic predictive model script template
-    const scriptContent = `# predictive_model.py - Basic predictive model script
-
-import sys
-import os
-import json
-import logging
-from datetime import datetime
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("predictive_model.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-def main():
-    """Main function to process input and generate predictions"""
-    try:
-        # Get input from Node.js
-        input_data = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
-        
-        # Log the received data
-        logger.info(f"Received request: {input_data.get('type', 'unknown')}")
-        
-        # Handle health check
-        if input_data.get('type') == 'health_check':
-            result = {"status": "ok", "timestamp": datetime.now().isoformat()}
-            print(json.dumps(result))
-            return
-            
-        # Process based on prediction type
-        prediction_type = input_data.get('prediction_type', '')
-        league = input_data.get('league', '')
-        
-        # Generate mock prediction result
-        result = {
-            "prediction": 0.75,
-            "confidence": 0.85,
-            "factors": ["historical_performance", "recent_form"],
-            "timestamp": datetime.now().isoformat(),
-            "league": league,
-            "type": prediction_type
-        }
-        
-        # Return result as JSON
-        print(json.dumps(result))
-        
-    except Exception as e:
-        logger.error(f"Error in predictive model: {str(e)}")
-        error_result = {
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }
-        print(json.dumps(error_result))
-        
-if __name__ == "__main__":
-    main()
-`;
-    
-    fs.writeFileSync(scriptPath, scriptContent);
-    console.log(`  ${colors.green}Created basic predictive model script at: ${scriptPath}${colors.reset}`);
-    return true;
-  } catch (error) {
-    console.log(`  ${colors.red}Error creating predictive model script: ${error.message}${colors.reset}`);
-    return false;
-  }
-}
-
 // Function to ask for manual Python path input
 function askForPythonPath() {
   return new Promise((resolve) => {
@@ -388,63 +259,24 @@ function askForPythonPath() {
   });
 }
 
-// Function to ask if user wants to create the predictive model script
-function askToCreateScript() {
-  return new Promise((resolve) => {
-    rl.question(`\n${colors.yellow}Would you like to create a basic predictive_model.py script? (y/n):\n${colors.reset}`, (input) => {
-      resolve(input.trim().toLowerCase() === 'y');
-    });
-  });
-}
-
 // Main function
 async function main() {
   try {
-    // Detect Python path
     let pythonPath = await detectPythonPath();
-    
-    // If Python path not detected, ask user for input
     if (!pythonPath) {
       pythonPath = await askForPythonPath();
-      
-      // Test the provided path
-      if (!(await testPythonPath(pythonPath))) {
-        console.log(`\n${colors.red}The provided Python path could not be verified.${colors.reset}`);
-        console.log(`${colors.yellow}Continuing with '${pythonPath}' anyway, but you may need to install Python or provide a correct path.${colors.reset}`);
-      }
     }
-    
-    // Update .env file with Python path
-    await updateEnvFile(pythonPath);
-    
-    // Check if predictive_model.py exists
-    const scriptPath = checkPredictiveModelScript();
-    
-    // If script doesn't exist, ask if user wants to create it
-    if (!scriptPath) {
-      const createScript = await askToCreateScript();
-      
-      if (createScript) {
-        const defaultScriptPath = path.join(process.cwd(), 'scripts', 'predictive_model.py');
-        createPredictiveModelScript(defaultScriptPath);
-      } else {
-        console.log(`\n${colors.yellow}You'll need to create the predictive_model.py script manually.${colors.reset}`);
-      }
+    const updated = await updateEnvFile(pythonPath);
+    if (updated) {
+      console.log(`\n${colors.green}Python path updated successfully.${colors.reset}`);
+    } else {
+      console.log(`\n${colors.red}Failed to update Python path.${colors.reset}`);
     }
-    
-    console.log(`\n${colors.bright}${colors.green}Python path fix completed successfully!${colors.reset}`);
-    console.log(`\n${colors.cyan}Next steps:${colors.reset}`);
-    console.log(`1. Run ${colors.bright}npm start${colors.reset} to start your application`);
-    console.log(`2. If you still encounter issues, run ${colors.bright}npm run diagnose:full${colors.reset} for detailed diagnostics`);
-    
-    rl.close();
   } catch (error) {
-    console.error(`\n${colors.red}Error during Python path fix:${colors.reset} ${error.message}`);
-    console.error(error.stack);
+    console.error(`\n${colors.red}Error:${colors.reset} ${error.message}`);
+  } finally {
     rl.close();
-    process.exit(1);
   }
 }
 
-// Run the main function
 main();

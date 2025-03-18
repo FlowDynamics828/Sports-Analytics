@@ -15,7 +15,7 @@ const LEAGUES = {
     // American Sports Leagues
     nba: {
         name: 'NBA',
-        statsCalculator: advancedCalculations.calculateNBAStats,
+        statsCalculator: advancedCalculations.calculateAdvancedMetric,
         advancedMetrics: {
             scoring: ['per', 'trueShooting', 'effectiveFgPct', 'pointsPerPossession'],
             efficiency: ['offRating', 'defRating', 'netRating', 'pace'],

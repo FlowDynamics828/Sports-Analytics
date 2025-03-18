@@ -484,8 +484,29 @@ async function fixRedisCleanup() {
   }
 }
 
+// Function to check and install missing Node.js modules
+function checkAndInstallModules() {
+  const requiredModules = ['@opentelemetry/exporter-trace-otlp-http'];
+  requiredModules.forEach(module => {
+    try {
+      require.resolve(module);
+      console.log(`${colors.green}✓ Module ${module} is installed${colors.reset}`);
+    } catch (e) {
+      console.log(`${colors.yellow}⚠ Module ${module} is missing. Installing...${colors.reset}`);
+      try {
+        execSync(`npm install ${module}`, { stdio: 'inherit' });
+        console.log(`${colors.green}✓ Module ${module} installed successfully${colors.reset}`);
+      } catch (installError) {
+        console.log(`${colors.red}✗ Failed to install module ${module}: ${installError.message}${colors.reset}`);
+        overallStatus = false;
+      }
+    }
+  });
+}
+
 // Main function
 async function main() {
+  checkAndInstallModules();
   logger.info('Starting Redis connection fix...');
   
   // 1. Check Redis connection
@@ -539,10 +560,6 @@ async function main() {
 
 // Run the main function
 main().catch(error => {
-  console.error(`\n${colors.red}Error during Redis connection fix:${colors.reset} ${error.message}`);
+  console.error(`\n${colors.red}Fatal error:${colors.reset} ${error.message}`);
   console.error(error.stack);
-  logger.error(`Error in fix-redis-connection.js: ${error.message}`);
-  logger.error(error.stack);
-  rl.close();
-  process.exit(1);
 });

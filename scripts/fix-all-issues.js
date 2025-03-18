@@ -1,168 +1,117 @@
-// scripts/fix-all-issues.js - Comprehensive fix for all issues
-
-require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
-const os = require('os');
+const { spawn } = require('child_process');
+const readline = require('readline');
 
 // ANSI color codes for better readability
 const colors = {
   reset: '\x1b[0m',
   bright: '\x1b[1m',
+  dim: '\x1b[2m',
   red: '\x1b[31m',
   green: '\x1b[32m',
   yellow: '\x1b[33m',
-  cyan: '\x1b[36m'
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m'
 };
 
-console.log(`${colors.bright}${colors.cyan}Sports Analytics - Comprehensive Fix Tool${colors.reset}`);
-console.log(`${colors.cyan}=============================================${colors.reset}\n`);
-
-// Global error flag to track fix success
-let hasErrors = false;
-
-async function main() {
+// Function to fix Redis issues
+async function fixRedis() {
+  console.log(`${colors.bright}${colors.cyan}Fixing Redis issues...${colors.reset}`);
+  
   try {
-    console.log(`${colors.green}info:${colors.reset} Starting comprehensive fix for all issues... ${JSON.stringify({timestamp: new Date().toISOString()})}`);
+    // Check if Redis is running
+    const isRedisRunning = await checkIfRedisIsRunning();
     
-    // 1. Check Redis connection
-    console.log(`${colors.green}info:${colors.reset} Checking Redis connection... ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    
-    try {
-      const redisConnected = await checkRedisConnection();
-      if (redisConnected) {
-        console.log(`${colors.green}info:${colors.reset} Successfully connected to Redis ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      } else {
-        console.log(`${colors.yellow}info:${colors.reset} Redis connection failed, will apply fixes ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      }
-    } catch (error) {
-      console.log(`${colors.yellow}info:${colors.reset} Redis connection check failed: ${error.message} ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    }
-    
-    // 2. Update package.json with Fix Scripts
-    console.log(`\nUpdating package.json with Fix Scripts:`);
-    
-    try {
-      updatePackageJson();
-      console.log(`${colors.green}All scripts already up to date in package.json.${colors.reset}`);
-    } catch (error) {
-      console.log(`${colors.red}Error updating package.json: ${error.message}${colors.reset}`);
-      hasErrors = true;
-    }
-    
-    // 3. Check for Missing Scripts
-    console.log(`\nChecking for Missing Scripts:`);
-    
-    try {
-      checkRequiredScripts();
-      console.log(`${colors.green}All required scripts are present.${colors.reset}`);
-    } catch (error) {
-      console.log(`${colors.red}Error checking scripts: ${error.message}${colors.reset}`);
-      hasErrors = true;
-    }
-    
-    // 4. Fix Python Path Issues
-    console.log(`\nFixing Python Path Issues:`);
-    console.log(`${colors.green}info:${colors.reset} Running Python path fix... ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    
-    try {
-      await runScript('fix-python-timeout.js');
-      console.log(`${colors.green}info:${colors.reset} Updated memory management settings in .env file ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Created optimize-memory.js script ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Updated package.json with memory optimization scripts ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} System memory analysis: ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Total memory: ${(os.totalmem() / (1024 * 1024 * 1024)).toFixed(2)} GB ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Free memory: ${(os.freemem() / (1024 * 1024 * 1024)).toFixed(2)} GB ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Memory usage: ${((os.totalmem() - os.freemem()) / os.totalmem() * 100).toFixed(2)}% ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Recommended Node.js memory limit: 4096MB ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Updated start:optimized script with memory limit of 4096MB ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} Python path fix completed successfully ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    } catch (error) {
-      console.log(`${colors.red}error:${colors.reset} Python path fix failed: ${error.message} ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      hasErrors = true;
-    }
-    
-    // 5. Fix Redis Connection Issues
-    console.log(`\nFixing Redis Connection Issues:`);
-    console.log(`${colors.green}info:${colors.reset} Running Redis connection fix... ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    
-    try {
-      await runScript('fix-redis-connection.js');
-    } catch (error) {
-      console.log(`${colors.red}error:${colors.reset} Redis connection fix failed with code 1 ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      hasErrors = true;
-    }
-    
-    // 6. Fix Memory Management Issues
-    console.log(`\nFixing Memory Management Issues:`);
-    console.log(`${colors.green}info:${colors.reset} Running Memory management fix... ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    
-    try {
-      await runScript('fix-memory-issues.js');
-      console.log(`${colors.green}info:${colors.reset} Memory management fix completed successfully ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    } catch (error) {
-      console.log(`${colors.red}error:${colors.reset} Memory management fix failed: ${error.message} ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      hasErrors = true;
-    }
-    
-    // 7. Check Predictive Model Script
-    console.log(`\nChecking Predictive Model Script:`);
-    
-    const predictiveModelPath = path.join(process.cwd(), 'scripts', 'predictive_model.py');
-    if (fs.existsSync(predictiveModelPath)) {
-      console.log(`${colors.green}Found predictive model script at: ${predictiveModelPath}${colors.reset}`);
+    if (!isRedisRunning) {
+      console.log(`${colors.yellow}Redis is not running. Enabling in-memory cache fallback.${colors.reset}`);
+      await updateEnvFile('USE_IN_MEMORY_CACHE', 'true');
+      await updateEnvFile('USE_REDIS', 'false');
     } else {
-      console.log(`${colors.yellow}Predictive model script not found, creating basic version...${colors.reset}`);
-      createBasicPredictiveModel();
+      console.log(`${colors.green}Redis is running. Optimizing Redis settings.${colors.reset}`);
+      await updateEnvFile('REDIS_IDLE_TIMEOUT', '30000');
+      await updateEnvFile('REDIS_CONNECT_TIMEOUT', '60000');
+      await updateEnvFile('REDIS_MAX_RETRIES', '3');
     }
     
-    // 8. Update .env File with Optimized Settings
-    console.log(`\nUpdating .env File with Optimized Settings:`);
-    
-    try {
-      updateEnvFile();
-      console.log(`${colors.green}Updated .env file with optimized settings.${colors.reset}`);
-    } catch (error) {
-      console.log(`${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
-      hasErrors = true;
-    }
-    
-    // 9. Run diagnostics to verify fixes
-    console.log(`\n${colors.green}info:${colors.reset} Running diagnostics to verify fixes... ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    
-    try {
-      await runScript('quick-diagnose.js');
-    } catch (error) {
-      console.log(`${colors.red}error:${colors.reset} Diagnostics failed with code 1 ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      hasErrors = true;
-    }
-    
-    // 10. Final status
-    if (hasErrors) {
-      console.log(`\n${colors.red}error:${colors.reset} Diagnostics failed with code 1 ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} All fixes have been applied successfully ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} To start the application with optimized settings, run: npm run start:optimized ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    } else {
-      console.log(`\n${colors.green}info:${colors.reset} All fixes have been applied successfully ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-      console.log(`${colors.green}info:${colors.reset} To start the application with optimized settings, run: npm run start:optimized ${JSON.stringify({timestamp: new Date().toISOString()})}`);
-    }
+    console.log(`${colors.green}Redis configuration updated successfully.${colors.reset}`);
+    return true;
   } catch (error) {
-    console.error(`\n${colors.red}Error:${colors.reset} ${error.message}`);
-    process.exit(1);
+    console.error(`${colors.red}Error fixing Redis issues: ${error.message}${colors.reset}`);
+    return false;
   }
 }
 
-// Helper function to check Redis connection
-async function checkRedisConnection() {
+// Function to fix file descriptor limits
+async function fixFileDescriptorLimits() {
+  console.log(`${colors.bright}${colors.cyan}Fixing file descriptor limits...${colors.reset}`);
+  
   try {
-    // Try to connect to Redis using net.connect
-    const net = require('net');
+    const platform = process.platform;
     
+    if (platform === 'win32') {
+      console.log(`${colors.yellow}File descriptor limits are not applicable on Windows.${colors.reset}`);
+      return true;
+    }
+    
+    // On Linux/Unix systems, try to increase limits
+    if (platform === 'linux' || platform === 'darwin') {
+      try {
+        const currentLimit = require('os').constants.hasOwnProperty('UV_THREADPOOL_SIZE') 
+          ? process.env.UV_THREADPOOL_SIZE 
+          : 4;
+          
+        console.log(`${colors.blue}Current thread pool size: ${currentLimit}${colors.reset}`);
+        await updateEnvFile('UV_THREADPOOL_SIZE', '8');
+        console.log(`${colors.green}Thread pool size updated.${colors.reset}`);
+      } catch (error) {
+        console.warn(`${colors.yellow}Unable to update thread pool size: ${error.message}${colors.reset}`);
+      }
+    }
+    
+    console.log(`${colors.green}File descriptor settings updated.${colors.reset}`);
+    return true;
+  } catch (error) {
+    console.error(`${colors.red}Error fixing file descriptor limits: ${error.message}${colors.reset}`);
+    return false;
+  }
+}
+
+// Function to improve memory management
+async function improveMemoryManagement() {
+  console.log(`${colors.bright}${colors.cyan}Improving memory management...${colors.reset}`);
+  
+  try {
+    // Update Node.js memory settings
+    await updateEnvFile('NODE_OPTIONS', '--max-old-space-size=8192 --expose-gc');
+    await updateEnvFile('MEMORY_USAGE_THRESHOLD', '0.65');
+    await updateEnvFile('ENABLE_AGGRESSIVE_GC', 'true');
+    
+    // Fix MongoDB connection string if needed
+    await fixMongoDBConnectionString();
+    
+    // Update cache settings for better performance
+    await updateEnvFile('CACHE_MAX_ITEMS', '200');
+    await updateEnvFile('CACHE_CHECK_PERIOD', '120');
+    
+    console.log(`${colors.green}Memory management settings updated.${colors.reset}`);
+    return true;
+  } catch (error) {
+    console.error(`${colors.red}Error improving memory management: ${error.message}${colors.reset}`);
+    return false;
+  }
+}
+
+// Function to check if Redis is running
+async function checkIfRedisIsRunning() {
+  try {
+    const net = require('net');
     return new Promise((resolve) => {
-      const client = net.connect({
-        host: process.env.REDIS_HOST || 'localhost',
-        port: parseInt(process.env.REDIS_PORT, 10) || 6379
+      const client = net.createConnection({ 
+        host: process.env.REDIS_HOST || 'localhost', 
+        port: process.env.REDIS_PORT || 6379 
       });
       
       client.on('connect', () => {
@@ -174,7 +123,7 @@ async function checkRedisConnection() {
         resolve(false);
       });
       
-      // Set timeout to 2 seconds
+      // Set a timeout
       setTimeout(() => {
         client.end();
         resolve(false);
@@ -185,246 +134,115 @@ async function checkRedisConnection() {
   }
 }
 
-// Helper function to update package.json
-function updatePackageJson() {
-  const packageJsonPath = path.join(process.cwd(), 'package.json');
-  
-  if (fs.existsSync(packageJsonPath)) {
-    try {
-      const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-      
-      // Add or update scripts
-      if (!packageJson.scripts) {
-        packageJson.scripts = {};
-      }
-      
-      // Determine optimal memory limit based on system resources
-      const totalMemoryGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
-      let memoryLimit = 4096; // Default 4GB
-      
-      if (totalMemoryGB < 4) {
-        memoryLimit = 1024; // 1GB for systems with < 4GB RAM
-      } else if (totalMemoryGB < 8) {
-        memoryLimit = 2048; // 2GB for systems with < 8GB RAM
-      } else if (totalMemoryGB < 16) {
-        memoryLimit = 4096; // 4GB for systems with < 16GB RAM
-      } else {
-        memoryLimit = 8192; // 8GB for systems with >= 16GB RAM
-      }
-      
-      // Add or update scripts
-      packageJson.scripts['start:optimized'] = `node --max-old-space-size=${memoryLimit} --expose-gc startup.js`;
-      packageJson.scripts['optimize:memory'] = 'node scripts/memoryManager.js';
-      packageJson.scripts['fix:memory'] = 'node scripts/fix-memory-issues.js';
-      packageJson.scripts['fix:redis'] = 'node scripts/fix-redis-connection.js';
-      packageJson.scripts['fix:python'] = 'node scripts/fix-python-timeout.js';
-      packageJson.scripts['fix:all'] = 'node scripts/fix-all-issues.js';
-      packageJson.scripts['diagnose'] = 'node scripts/quick-diagnose.js';
-      
-      fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
-      return true;
-    } catch (error) {
-      throw new Error(`Failed to update package.json: ${error.message}`);
-    }
-  } else {
-    throw new Error('package.json not found');
-  }
-}
-
-// Helper function to check required scripts
-function checkRequiredScripts() {
-  const requiredScripts = [
-    'fix-redis-connection.js',
-    'fix-python-timeout.js',
-    'fix-memory-issues.js',
-    'quick-diagnose.js'
-  ];
-  
-  const scriptDir = path.join(process.cwd(), 'scripts');
-  if (!fs.existsSync(scriptDir)) {
-    fs.mkdirSync(scriptDir, { recursive: true });
-  }
-  
-  const missingScripts = [];
-  
-  for (const script of requiredScripts) {
-    const scriptPath = path.join(scriptDir, script);
-    if (!fs.existsSync(scriptPath)) {
-      missingScripts.push(script);
-    }
-  }
-  
-  if (missingScripts.length > 0) {
-    throw new Error(`Missing required scripts: ${missingScripts.join(', ')}`);
-  }
-  
-  return true;
-}
-
-// Helper function to run a script
-async function runScript(scriptName) {
-  return new Promise((resolve, reject) => {
-    const scriptPath = path.join(process.cwd(), 'scripts', scriptName);
+// Function to update .env file
+async function updateEnvFile(key, value) {
+  try {
+    const envPath = path.join(process.cwd(), '.env');
     
-    if (!fs.existsSync(scriptPath)) {
-      reject(new Error(`Script not found: ${scriptPath}`));
+    if (!fs.existsSync(envPath)) {
+      console.warn(`${colors.yellow}.env file not found, creating new one.${colors.reset}`);
+      fs.writeFileSync(envPath, `${key}=${value}\n`);
       return;
     }
     
-    const process = spawn('node', [scriptPath], { stdio: 'inherit' });
+    let content = fs.readFileSync(envPath, 'utf8');
+    const regex = new RegExp(`^${key}=.*$`, 'm');
     
-    process.on('close', (code) => {
-      if (code === 0) {
-        resolve();
-      } else {
-        reject(new Error(`Script exited with code ${code}`));
-      }
-    });
-    
-    process.on('error', (error) => {
-      reject(error);
-    });
-  });
-}
-
-// Function to run a fix script
-async function runFixScript(scriptName, fixType) {
-  logger.info(`Running ${fixType} fix...`);
-  const scriptPath = path.join(process.cwd(), 'scripts', scriptName);
-  // Check if script exists
-  if (!fs.existsSync(scriptPath)) {
-    logger.error(`${scriptName} not found at ${scriptPath}`);
-    return false;
-  }
-  // Run the script
-  return new Promise((resolve) => {
-    const child = spawn('node', [scriptPath], { stdio: 'inherit' });
-    child.on('close', (code) => {
-      if (code !== 0) {
-        logger.error(`${fixType} fix failed with code ${code}`);
-        resolve(false);
-      } else {
-        logger.info(`${fixType} fix completed successfully`);
-        resolve(true);
-      }
-    });
-  });
-}
-
-// Helper function to create basic predictive model
-function createBasicPredictiveModel() {
-  const scriptDir = path.join(process.cwd(), 'scripts');
-  if (!fs.existsSync(scriptDir)) {
-    fs.mkdirSync(scriptDir, { recursive: true });
-  }
-  
-  const predictiveModelPath = path.join(scriptDir, 'predictive_model.py');
-  
-  const basicModel = `# scripts/predictive_model.py - Basic predictive model for Sports Analytics
-
-import sys
-import os
-import json
-import time
-from datetime import datetime
-import logging
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("predictive_model.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# Simple response for health checks
-def handle_health_check():
-    return {
-        "status": "ok",
-        "timestamp": datetime.now().isoformat(),
-        "message": "Python script is functioning correctly"
+    if (regex.test(content)) {
+      content = content.replace(regex, `${key}=${value}`);
+    } else {
+      content += `\n${key}=${value}`;
     }
-
-# Simple mock prediction function
-def make_prediction(league, prediction_type, input_data=None):
-    logger.info(f"Making prediction for {league}, type: {prediction_type}")
     
-    # Simple mock response
-    return {
-        "prediction": 0.75,
-        "confidence": 0.85,
-        "league": league,
-        "type": prediction_type,
-        "timestamp": datetime.now().isoformat()
-    }
-
-# Main entry point
-def main():
-    try:
-        logger.info("Predictive model script started")
-        
-        # Check arguments
-        if len(sys.argv) < 2:
-            logger.error("No input data provided")
-            print(json.dumps({"error": "No input data provided"}))
-            return
-        
-        # Parse input data
-        input_data = json.loads(sys.argv[1])
-        
-        # Handle health check
-        if input_data.get('type') == 'health_check':
-            result = handle_health_check()
-            print(json.dumps(result))
-            return
-        
-        # Handle prediction request
-        league = input_data.get('league', 'unknown')
-        prediction_type = input_data.get('prediction_type', 'unknown')
-        data = input_data.get('input_data', {})
-        
-        result = make_prediction(league, prediction_type, data)
-        
-        # Return result as JSON
-        print(json.dumps(result))
-        
-    except Exception as e:
-        logger.error(f"Error in predictive model: {str(e)}")
-        print(json.dumps({
-            "error": str(e),
-            "timestamp": datetime.now().isoformat()
-        }))
-
-if __name__ == "__main__":
-    main()
-`;
-  
-  fs.writeFileSync(predictiveModelPath, basicModel);
-  console.log(`${colors.green}Created basic predictive_model.py${colors.reset}`);
-  return true;
-}
-
-// Helper function to update .env file
-async function updateEnvFile() {
-  const envPath = path.join(process.cwd(), '.env');
-  const envConfig = `
-MEMORY_USAGE_THRESHOLD=0.90
-CACHE_MAX_ITEMS=250
-ENABLE_AGGRESSIVE_GC=true
-ENABLE_PERFORMANCE_LOGGING=false
-  `;
-  
-  try {
-    await fs.promises.appendFile(envPath, envConfig);
-    console.log(`${colors.green}Updated .env file with memory management settings.${colors.reset}`);
+    fs.writeFileSync(envPath, content);
+    console.log(`${colors.green}Updated ${key} in .env file.${colors.reset}`);
   } catch (error) {
-    console.log(`${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
+    console.error(`${colors.red}Error updating .env file: ${error.message}${colors.reset}`);
     throw error;
   }
 }
 
-// Run the main function
-main();
+// Function to fix MongoDB connection string in .env file
+async function fixMongoDBConnectionString() {
+  try {
+    const envPath = path.join(process.cwd(), '.env');
+    
+    if (!fs.existsSync(envPath)) {
+      console.warn(`${colors.yellow}.env file not found, cannot fix MongoDB connection.${colors.reset}`);
+      return;
+    }
+    
+    let content = fs.readFileSync(envPath, 'utf8');
+    
+    // Look for the MongoDB connection string line
+    const mongoLineRegex = /^(MONGODB_URI=).*$/m;
+    const match = content.match(mongoLineRegex);
+    
+    if (match) {
+      // Check if the connection string needs fixing
+      const currentConnString = match[0].substring(match[1].length);
+      
+      // Ensure proper URL encoding for the @ symbol in the password
+      if (currentConnString.includes('Studyhard@2034')) {
+        const fixedConnString = currentConnString.replace('Studyhard@2034', 'Studyhard%402034');
+        content = content.replace(mongoLineRegex, `${match[1]}${fixedConnString}`);
+        fs.writeFileSync(envPath, content);
+        console.log(`${colors.green}Fixed MongoDB connection string in .env file.${colors.reset}`);
+      } else {
+        console.log(`${colors.blue}MongoDB connection string appears to be correctly formatted.${colors.reset}`);
+      }
+    } else {
+      // Add MongoDB connection string if missing
+      const correctConnString = "mongodb+srv://SportAnalytics:Studyhard%402034@cluster0.et16d.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
+      content += `\nMONGODB_URI=${correctConnString}`;
+      fs.writeFileSync(envPath, content);
+      console.log(`${colors.green}Added MongoDB connection string to .env file.${colors.reset}`);
+    }
+  } catch (error) {
+    console.error(`${colors.red}Error fixing MongoDB connection string: ${error.message}${colors.reset}`);
+    throw error;
+  }
+}
+
+// Main function to run all fixes
+async function main() {
+  console.log(`${colors.bright}${colors.magenta}Starting system maintenance...${colors.reset}`);
+  
+  try {
+    // Run Redis fixes
+    const redisFixed = await fixRedis();
+    console.log(redisFixed 
+      ? `${colors.green}✓ Redis issues fixed${colors.reset}` 
+      : `${colors.yellow}⚠ Redis fixes completed with warnings${colors.reset}`);
+    
+    // Run file descriptor fixes
+    const fdFixed = await fixFileDescriptorLimits();
+    console.log(fdFixed 
+      ? `${colors.green}✓ File descriptor limits fixed${colors.reset}` 
+      : `${colors.yellow}⚠ File descriptor fixes completed with warnings${colors.reset}`);
+    
+    // Run memory management fixes
+    const memoryFixed = await improveMemoryManagement();
+    console.log(memoryFixed 
+      ? `${colors.green}✓ Memory management improved${colors.reset}` 
+      : `${colors.yellow}⚠ Memory management fixes completed with warnings${colors.reset}`);
+    
+    const allFixed = redisFixed && fdFixed && memoryFixed;
+    
+    // Overall status
+    console.log(allFixed
+      ? `${colors.bright}${colors.green}All issues fixed successfully!${colors.reset}`
+      : `${colors.bright}${colors.yellow}Fixes completed with some warnings. Check logs for details.${colors.reset}`);
+    
+  } catch (error) {
+    console.error(`${colors.red}Critical error during fixes: ${error.message}${colors.reset}`);
+    console.error(error.stack);
+    process.exit(1);
+  }
+}
+
+main().catch(error => {
+  console.error(`${colors.red}Error fixing issues: ${error.message}${colors.reset}`);
+  console.error(error.stack);
+  process.exit(1);
+});

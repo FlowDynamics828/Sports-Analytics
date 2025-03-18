@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { promisify } = require('util');
+const { MongoClient, ObjectId } = require('mongodb');
 
 class SecurityManager {
     constructor() {
@@ -13,6 +14,15 @@ class SecurityManager {
         this.pepper = process.env.SECURITY_PEPPER || crypto.randomBytes(32).toString('hex');
         this.tokenSecret = process.env.JWT_SECRET;
         this.tokenExpiry = '24h';
+        this.mongoClient = new MongoClient(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true
+        });
+        this.mongoClient.connect().then(() => {
+            this.db = this.mongoClient.db(process.env.MONGODB_DB_NAME || 'sports-analytics');
+        }).catch(error => {
+            console.error('MongoDB connection error:', error);
+        });
     }
 
     async hashPassword(password) {
@@ -182,6 +192,38 @@ class SecurityManager {
             attempts.set(identifier, recentAttempts);
             return true;
         };
+    }
+
+    async storeRefreshToken(userId, refreshToken) {
+        try {
+            await this.db.collection('refreshTokens').insertOne({
+                userId: new ObjectId(userId),
+                token: refreshToken,
+                createdAt: new Date()
+            });
+        } catch (error) {
+            console.error('Error storing refresh token:', error);
+            throw new Error('Failed to store refresh token');
+        }
+    }
+
+    async verifyRefreshToken(refreshToken) {
+        try {
+            const tokenDoc = await this.db.collection('refreshTokens').findOne({ token: refreshToken });
+            return tokenDoc ? tokenDoc.userId : null;
+        } catch (error) {
+            console.error('Error verifying refresh token:', error);
+            throw new Error('Failed to verify refresh token');
+        }
+    }
+
+    async revokeRefreshToken(refreshToken) {
+        try {
+            await this.db.collection('refreshTokens').deleteOne({ token: refreshToken });
+        } catch (error) {
+            console.error('Error revoking refresh token:', error);
+            throw new Error('Failed to revoke refresh token');
+        }
     }
 }
 

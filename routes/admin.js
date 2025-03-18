@@ -6,6 +6,7 @@ const { AuthMiddleware } = require('../auth/authMiddleware');
 const logger = require('../utils/logger');
 const predictiveModel = require('../scripts/predictive_model');
 const LiveGameUpdater = require('../scripts/live-game-updater');
+const User = require('../models/User');
 
 /**
  * Admin authorization middleware
@@ -168,6 +169,47 @@ router.get('/logs', authenticate, authorizeAdmin, async (req, res) => {
     } catch (error) {
         logger.error('Log retrieval error:', error);
         res.status(500).json({ error: 'Failed to fetch logs' });
+    }
+});
+
+// Get all users (admin only)
+router.get('/users', async (req, res) => {
+    try {
+        const users = await User.find({}, '-password');
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Get user by ID (admin only)
+router.get('/users/:id', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id, '-password');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
+    }
+});
+
+// Update user subscription (admin only)
+router.patch('/users/:id/subscription', async (req, res) => {
+    try {
+        const { subscription } = req.body;
+        const user = await User.findByIdAndUpdate(
+            req.params.id,
+            { subscription },
+            { new: true, select: '-password' }
+        );
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        res.json(user);
+    } catch (error) {
+        res.status(500).json({ error: 'Server error' });
     }
 });
 

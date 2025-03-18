@@ -1,5 +1,3 @@
-// scripts/sync-teams.js
-// Updated for TheSportsDB v2 integration with premium key
 require('dotenv').config();
 const { MongoClient } = require('mongodb');
 const axios = require('axios');
@@ -17,19 +15,19 @@ const logger = winston.createLogger({
     format.json(),
     format.metadata()
   ),
-  defaultMeta: { service: 'sync-teams', version: '2.0.0' },
+  defaultMeta: { service: 'sync-teams' },
   transports: [
     new winston.transports.File({
       filename: 'logs/teams-error.log',
       level: 'error',
-      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 10000000,
-      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 5,
+      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 5000000,
+      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 3,
       tailable: true
     }),
     new winston.transports.File({
       filename: 'logs/teams.log',
-      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 10000000,
-      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 5,
+      maxsize: parseInt(process.env.LOG_FILE_MAX_SIZE, 10) || 5000000,
+      maxFiles: parseInt(process.env.LOG_MAX_FILES, 10) || 3,
       tailable: true
     }),
     new winston.transports.Console({
@@ -44,28 +42,65 @@ const logger = winston.createLogger({
 // MongoDB connection details from .env
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://SportAnalytics:Studyhard%402034@cluster0.et16d.mongodb.net/sports-analytics?retryWrites=true&w=majority&appName=Cluster0';
 const DB_NAME = process.env.MONGODB_DB_NAME || 'sports-analytics';
+const SPORTS_API_URL = process.env.SPORTS_API_URL;
+const SPORTS_API_KEY = process.env.SPORTS_API_KEY;
 
-// TheSportsDB V2 API configuration
-const SPORTSDB_API_KEY = process.env.SPORTSDB_API_KEY || '447279';
-const SPORTSDB_BASE_URL = process.env.SPORTSDB_BASE_URL || 'https://www.thesportsdb.com/api/v2/json';
-const API_TIMEOUT = parseInt(process.env.SPORTSDB_REQUEST_TIMEOUT, 10) || 30000;
-
-// Supported leagues with TheSportsDB league IDs
+// Supported leagues
 const SUPPORTED_LEAGUES = [
   'NFL', 'NBA', 'MLB', 'NHL',
   'PREMIER_LEAGUE', 'LA_LIGA', 'BUNDESLIGA', 'SERIE_A'
 ];
 
-// League ID mapping for TheSportsDB
-const LEAGUE_IDS = {
-  NFL: 4391,
-  NBA: 4387,
-  MLB: 4424,
-  NHL: 4380,
-  PREMIER_LEAGUE: 4328,
-  LA_LIGA: 4335,
-  BUNDESLIGA: 4331,
-  SERIE_A: 4332
+// API configuration
+const API_CONFIG = {
+  NBA: {
+    url: 'https://api.sportsdata.io/v3/nba',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4387
+  },
+  NFL: {
+    url: 'https://api.sportsdata.io/v3/nfl',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4391
+  },
+  MLB: {
+    url: 'https://api.sportsdata.io/v3/mlb',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4424
+  },
+  NHL: {
+    url: 'https://api.sportsdata.io/v3/nhl',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4380
+  },
+  PREMIER_LEAGUE: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4328
+  },
+  LA_LIGA: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4335
+  },
+  BUNDESLIGA: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4331
+  },
+  SERIE_A: {
+    url: 'https://api.sportsdata.io/v3/soccer',
+    key: '447279',
+    teamsEndpoint: '/scores/json/Teams',
+    competitionId: 4332
+  }
 };
 
 // Database manager instance
@@ -81,17 +116,17 @@ async function initializeDatabaseManager() {
       uri: MONGODB_URI,
       name: DB_NAME,
       options: {
-        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
-        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
-        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 10000,
-        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 30000
+        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 10,
+        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 1,
+        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 5000,
+        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 10000
       }
     });
-
+    
     await dbManager.initialize();
     logger.info('Database manager initialized successfully');
   }
-
+  
   return dbManager;
 }
 
@@ -101,36 +136,41 @@ async function initializeDatabaseManager() {
 async function syncTeams() {
   let client = null;
   try {
+    // Initialize database manager
     await initializeDatabaseManager();
-
+    
+    // Connect to MongoDB directly as backup if DatabaseManager fails
     if (!dbManager || !dbManager.client) {
       logger.warn('Database manager not available, using direct MongoDB connection');
       client = await MongoClient.connect(MONGODB_URI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
-        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
-        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 10000,
-        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 30000
+        maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 10,
+        minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 1,
+        connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 5000,
+        socketTimeoutMS: parseInt(process.env.SOCKET_TIMEOUT_MS, 10) || 10000
       });
-
+      
       logger.info('MongoDB connection established for team data synchronization');
     }
-
+    
     const db = dbManager?.client?.db(DB_NAME) || client.db(DB_NAME);
-
+    
+    // Ensure teams collection exists with proper indexes
     await ensureTeamsCollection(db);
-
+    
+    // Sync for each league
     for (const league of SUPPORTED_LEAGUES) {
       try {
-        await syncLeagueTeams(db, league);
+        await syncLeagueTeams(db, league, API_CONFIG[league]);
       } catch (leagueError) {
         logger.error(`Error syncing ${league} teams:`, leagueError);
+        // Continue with other leagues even if one fails
       }
     }
-
+    
     logger.info('Team data synchronization completed');
-
+    
   } catch (error) {
     logger.error('Error in team data synchronization:', error);
     throw error;
@@ -148,16 +188,18 @@ async function syncTeams() {
  */
 async function ensureTeamsCollection(db) {
   try {
+    // Check if collection exists
     const collections = await db.listCollections({ name: 'teams' }).toArray();
     if (collections.length === 0) {
+      // Create collection if it doesn't exist
       await db.createCollection('teams');
       logger.info('Created teams collection');
     }
-
+    
+    // Create indexes
     await db.collection('teams').createIndex({ teamId: 1 }, { unique: true });
     await db.collection('teams').createIndex({ league: 1 });
-    await db.collection('teams').createIndex({ name: 'text' });
-
+    
     logger.info('Ensured indexes for teams collection');
   } catch (error) {
     logger.error('Error ensuring teams collection:', error);
@@ -169,72 +211,80 @@ async function ensureTeamsCollection(db) {
  * Synchronize team data for a specific league
  * @param {Object} db - MongoDB database instance
  * @param {string} league - League identifier
+ * @param {Object} config - API configuration for the league
  */
-async function syncLeagueTeams(db, league) {
+async function syncLeagueTeams(db, league, config) {
   try {
-    logger.info(`Starting team data synchronization for ${league} (v2)`);
-
-    const teams = await fetchTeams(league);
+    logger.info(`Starting team data synchronization for ${league}`);
+    
+    // Fetch team data
+    const teams = await fetchTeams(league, config);
     logger.info(`Fetched ${teams.length} teams for ${league}`);
-
+    
     let updatedCount = 0;
     let insertedCount = 0;
-
+    
+    // Process each team
     for (const team of teams) {
       try {
+        // Transform team data to our schema
         const transformedTeam = transformTeamData(team, league);
-
-        // Skip teams with invalid or missing IDs
-        if (!transformedTeam.teamId) {
-          logger.warn(`Skipping team with missing ID: ${JSON.stringify(team).substring(0, 100)}...`);
-          continue;
-        }
-
+        
+        // Update or insert team
         const result = await db.collection('teams').updateOne(
           { teamId: transformedTeam.teamId },
           { $set: transformedTeam },
           { upsert: true }
         );
-
-        if (result.matchedCount > 0) updatedCount++;
-        else if (result.upsertedCount > 0) insertedCount++;
+        
+        if (result.matchedCount > 0) {
+          updatedCount++;
+        } else if (result.upsertedCount > 0) {
+          insertedCount++;
+        }
       } catch (teamError) {
         logger.error(`Error processing team:`, teamError);
       }
     }
-
+    
     logger.info(`${league} teams sync completed: ${insertedCount} inserted, ${updatedCount} updated`);
-
+    
   } catch (error) {
-    logger.error(`Error syncing ${league} teams (v2):`, error);
+    logger.error(`Error syncing ${league} teams:`, error);
     throw error;
   }
 }
 
 /**
- * Fetch teams for a league using TheSportsDB V2 API
+ * Fetch teams for a league
  * @param {string} league - League identifier
+ * @param {Object} config - API configuration
  * @returns {Promise<Array>} Teams
  */
-async function fetchTeams(league) {
+async function fetchTeams(league, config) {
   try {
-    const leagueId = LEAGUE_IDS[league];
+    // Set up API request parameters
+    let endpoint = config.teamsEndpoint;
     
-    // Using lookup_all_teams endpoint to get all teams in a league
-    const url = `${SPORTSDB_BASE_URL}/${SPORTSDB_API_KEY}/lookup_all_teams.php?id=${leagueId}`;
+    logger.debug(`Requesting ${league} teams`);
     
-    logger.debug(`Requesting teams from: ${url}`);
+    // Make API request
+    const response = await axios.get(`${config.url}${endpoint}`, {
+      headers: {
+        'Ocp-Apim-Subscription-Key': config.key
+      },
+      timeout: 30000 // 30 second timeout
+    });
     
-    const response = await axios.get(url, { timeout: API_TIMEOUT });
-    
-    if (!response.data || !response.data.teams || !Array.isArray(response.data.teams)) {
-      logger.warn(`No ${league} teams returned from TheSportsDB v2`);
+    if (!response.data || !Array.isArray(response.data)) {
+      logger.warn(`No ${league} teams returned from API.`);
       return [];
     }
     
-    return response.data.teams;
+    return response.data;
+    
   } catch (error) {
-    logger.error(`Error fetching ${league} teams (v2):`, error);
+    logger.error(`Error fetching ${league} teams:`, error);
     return [];
   }
 }
@@ -247,66 +297,35 @@ async function fetchTeams(league) {
  */
 function transformTeamData(team, league) {
   return {
-    teamId: team.idTeam,
+    teamId: team.TeamID || team.TeamId || team.teamId || team.id,
     league,
-    name: team.strTeam,
-    alternateNames: [
-      team.strAlternate || '',
-      team.strTeamShort || ''
-    ].filter(Boolean),
-    abbreviation: team.strTeamShort || '',
-    city: team.strStadiumLocation || '',
-    country: team.strCountry || '',
-    founded: team.intFormedYear || null,
-    website: team.strWebsite || '',
-    facebook: team.strFacebook || '',
-    twitter: team.strTwitter || '',
-    instagram: team.strInstagram || '',
-    description: team.strDescriptionEN || '',
-    stadium: {
-      name: team.strStadium || '',
-      location: team.strStadiumLocation || '',
-      capacity: parseInt(team.intStadiumCapacity) || 0,
-      description: team.strStadiumDescription || ''
-    },
-    logos: {
-      main: team.strTeamBadge || '',
-      alt: team.strTeamJersey || '',
-      banner: team.strTeamBanner || '',
-      logo: team.strTeamLogo || '',
-      fanart: team.strTeamFanart1 || ''
-    },
-    colors: {
-      primary: team.strPrimaryColor || '',
-      secondary: team.strSecondaryColor || '',
-      tertiary: team.strTertiaryColor || ''
-    },
+    name: team.Name || team.TeamName || team.name,
+    abbreviation: team.Abbreviation || team.abbreviation,
+    city: team.City || team.city,
+    stadium: team.Stadium || team.stadium,
+    logo: team.WikipediaLogoUrl || team.logo,
     createdAt: new Date(),
-    updatedAt: new Date(),
-    metadata: {
-      source: 'TheSportsDB-V2',
-      lastSynced: new Date()
-    }
+    updatedAt: new Date()
   };
 }
 
-// Schedule the sync to run daily at 3:00 AM
-cron.schedule('0 3 * * *', async () => {
-  try {
-    logger.info('Starting scheduled team data synchronization (v2)');
-    await syncTeams();
-    logger.info('Scheduled team data synchronization completed successfully (v2)');
-  } catch (error) {
-    logger.error('Scheduled team data synchronization failed (v2):', error);
-  }
+// Schedule the sync to run daily at 3 AM
+cron.schedule('0 3 * * *', () => {
+  logger.info('Starting scheduled team data synchronization');
+  syncTeams().catch(error => logger.error('Scheduled sync failed:', error));
 });
 
 // Run sync immediately on startup
-syncTeams().catch(error => logger.error('Initial sync failed (v2):', error));
+syncTeams().catch(error => logger.error('Initial sync failed:', error));
 
 // Execute directly if run from command line
 if (require.main === module) {
   syncTeams()
-    .then(() => { logger.info('Team data synchronization executed successfully (v2)'); process.exit(0); })
-    .catch(error => { logger.error('Team data synchronization failed (v2):', error); process.exit(1); });
-}
+    .then(() => {
+      logger.info('Team data synchronization executed successfully');
+      process.exit(0);
+    })
+    .catch(error => {
+      logger.error('Team data synchronization failed:', error);
+      process.exit(1);
+    });

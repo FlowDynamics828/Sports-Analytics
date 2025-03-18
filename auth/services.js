@@ -45,7 +45,8 @@ const createNetworkManager = () => {
         baseURL: process.env.API_BASE_URL || 'http://localhost:4000',
         timeout: 10000,
         headers: {
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${process.env.API_TOKEN || ''}` // Add authorization header if needed
         }
     });
 
