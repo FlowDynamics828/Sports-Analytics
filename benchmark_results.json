@@ -1,0 +1,10 @@
+{
+  "passedTests": 6,
+  "totalTests": 12,
+  "metrics": {
+    "averageAccuracy": 0,
+    "averageCalibration": 0,
+    "averageLatencyMs": 216.33333333333334
+  },
+  "competitiveAnalysis": {}
+}

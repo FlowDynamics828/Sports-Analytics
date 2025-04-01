@@ -1,26 +1,30 @@
 const express = require('express');
 const router = express.Router();
 const { authenticate } = require('../auth/authMiddleware');
-const { StatsCalculator } = require('../utils/statsCalculator');
+const StatsCalculator = require('../utils/statsCalculator');
 const predictiveModel = require('../scripts/predictive_model');
 const { LogManager } = require('../utils/logger');
 const { CacheManager } = require('../utils/cache');
-const { CircuitBreaker } = require('../utils/circuitBreaker');
-const { RateLimiterCluster } = require('../utils/rateLimiter');
-const { param, query, validationResult } = require('express-validator');
+const { check, param, query, validationResult } = require('express-validator');
+const CircuitBreaker = require('opossum');
 const asyncHandler = require('express-async-handler');
+const { createLimiter } = require('../utils/rateLimiter');
 
 // Initialize services
-const logger = new LogManager().logger;
+const logger = new LogManager({ service: 'analytics' }).logger;
 const cache = new CacheManager();
-const breaker = new CircuitBreaker();
-const rateLimiter = new RateLimiterCluster();
+// Initialize circuit breaker with a dummy function that will be replaced when used
+const breaker = new CircuitBreaker(() => Promise.resolve({}), {
+    timeout: 30000,
+    errorThresholdPercentage: 50,
+    resetTimeout: 30000
+});
 
 // Configure rate limits for analytics endpoints
 const analyticsLimiter = {
-    game: rateLimiter.createLimiter({ windowMs: 60000, max: 100 }), // 100 requests per minute
-    team: rateLimiter.createLimiter({ windowMs: 60000, max: 50 }), // 50 requests per minute
-    league: rateLimiter.createLimiter({ windowMs: 60000, max: 30 }) // 30 requests per minute
+    game: createLimiter({ max: 100, windowMs: 60000 }), // 100 requests per minute
+    team: createLimiter({ max: 50, windowMs: 60000 }),  // 50 requests per minute
+    league: createLimiter({ max: 30, windowMs: 60000 }) // 30 requests per minute
 };
 
 // Cache configuration

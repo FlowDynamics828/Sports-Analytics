@@ -3,117 +3,269 @@
 <head>
     <meta charset="UTF-8">
     <title>Sign Up - Sports Analytics Pro</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://cdnjs.cloudflare.com https://js.stripe.com; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://js.stripe.com; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; frame-src https://js.stripe.com; connect-src https://api.stripe.com;">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
     <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        /* Custom styles */
+        .animate-shake {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-3px, 0, 0); }
+            40%, 60% { transform: translate3d(3px, 0, 0); }
+        }
+        
+        .subscription-option {
+            transition: all 0.3s ease;
+        }
+        
+        .subscription-option:hover {
+            transform: translateY(-5px);
+        }
+        
+        .subscription-option.selected {
+            border-color: #3B82F6;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+        
+        .bg-gradient {
+            background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
+        }
+    </style>
 </head>
 <body class="bg-gray-900 text-white">
-    <div class="min-h-screen flex items-center justify-center">
-        <div class="max-w-md w-full p-6">
-            <h1 class="text-3xl font-bold text-center mb-8">Create Your Account</h1>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-gray-900/80 z-50 flex items-center justify-center hidden">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-xl text-center">
+            <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
+            <p id="loadingMessage" class="mt-4 text-xl">Creating your account...</p>
+        </div>
+    </div>
+    
+    <div class="min-h-screen flex items-center justify-center py-12">
+        <div class="max-w-xl w-full p-6 bg-gray-800 rounded-xl shadow-xl">
+            <div class="text-center mb-8">
+                <h1 class="text-3xl font-bold">Create Your Account</h1>
+                <p class="text-gray-400 mt-2">Join thousands of sports analytics professionals</p>
+            </div>
             
             <form id="signupForm" class="space-y-6">
                 <div>
-                    <label class="block text-sm font-medium mb-2">Email</label>
-                    <input type="email" id="email" required 
-                           class="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none text-white">
+                    <label for="email" class="block text-sm font-medium mb-2">Email</label>
+                    <div class="relative">
+                        <input type="email" id="email" required 
+                               class="w-full p-3 rounded bg-gray-700 border border-gray-600 focus:border-blue-500 focus:outline-none text-white">
+                        <div id="emailValidIcon" class="absolute inset-y-0 right-0 flex items-center pr-3 opacity-0 text-green-500">
+                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                        </div>
+                    </div>
+                    <div id="emailError" class="text-red-500 text-xs mt-1 hidden"></div>
                 </div>
                 
                 <div>
-                    <label class="block text-sm font-medium mb-2">Password</label>
-                    <input type="password" id="password" required 
-                           class="w-full p-3 rounded bg-gray-800 border border-gray-700 focus:border-blue-500 focus:outline-none text-white">
+                    <label for="password" class="block text-sm font-medium mb-2">Password</label>
+                    <div class="relative">
+                        <input type="password" id="password" required 
+                               class="w-full p-3 rounded bg-gray-700 border border-gray-600 focus:border-blue-500 focus:outline-none text-white">
+                        <button type="button" id="togglePassword" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-white">
+                            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="passwordStrength" class="mt-1 h-1 bg-gray-700 rounded">
+                        <div id="passwordStrengthBar" class="h-1 bg-red-500 rounded-l" style="width: 0%"></div>
+                    </div>
+                    <div id="passwordHint" class="text-xs text-gray-400 mt-1">Password must be at least 8 characters</div>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium mb-2">Subscription Plan</label>
+                    <label class="block text-sm font-medium mb-4">Subscription Plan</label>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer hover:border-blue-500">
-                            <input type="radio" name="subscription" value="basic" data-price="price_basic" required>
-                            <div class="text-lg font-bold">Basic</div>
-                            <div class="text-2xl mb-2">$9.99</div>
-                            <div class="text-gray-400 text-sm">Monthly</div>
+                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer">
+                            <div class="flex items-start mb-2">
+                                <input type="radio" name="subscription" value="basic" data-price="price_basic" required class="mt-1">
+                                <div class="ml-2">
+                                    <div class="text-lg font-bold">Basic</div>
+                                    <div class="text-2xl font-bold mb-2">$9.99</div>
+                                    <div class="text-gray-400 text-sm">Monthly</div>
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-2">
+                                Access to major league data with daily updates
+                            </div>
                         </div>
-                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer hover:border-blue-500">
-                            <input type="radio" name="subscription" value="pro" data-price="price_pro">
-                            <div class="text-lg font-bold">Pro</div>
-                            <div class="text-2xl mb-2">$24.99</div>
-                            <div class="text-gray-400 text-sm">Monthly</div>
+                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer bg-blue-900/20 border-blue-700">
+                            <div class="absolute -top-2 right-3">
+                                <span class="bg-blue-600 text-xs font-bold px-2 py-1 rounded-full">POPULAR</span>
+                            </div>
+                            <div class="flex items-start mb-2">
+                                <input type="radio" name="subscription" value="pro" data-price="price_pro" checked class="mt-1">
+                                <div class="ml-2">
+                                    <div class="text-lg font-bold">Pro</div>
+                                    <div class="text-2xl font-bold mb-2">$24.99</div>
+                                    <div class="text-gray-400 text-sm">Monthly</div>
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-2">
+                                Real-time data, advanced analytics for all leagues
+                            </div>
                         </div>
-                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer hover:border-blue-500">
-                            <input type="radio" name="subscription" value="enterprise" data-price="price_enterprise">
-                            <div class="text-lg font-bold">Enterprise</div>
-                            <div class="text-2xl mb-2">$99.99</div>
-                            <div class="text-gray-400 text-sm">Monthly</div>
+                        <div class="subscription-option p-4 border border-gray-700 rounded cursor-pointer">
+                            <div class="flex items-start mb-2">
+                                <input type="radio" name="subscription" value="enterprise" data-price="price_enterprise" class="mt-1">
+                                <div class="ml-2">
+                                    <div class="text-lg font-bold">Enterprise</div>
+                                    <div class="text-2xl font-bold mb-2">$99.99</div>
+                                    <div class="text-gray-400 text-sm">Monthly</div>
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-400 mt-2">
+                                Custom analytics, API access, and dedicated support
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <div id="card-element" class="p-3 rounded bg-gray-800 border border-gray-700">
-                    <!-- Stripe Card Element will be inserted here -->
+                <div>
+                    <label class="block text-sm font-medium mb-2">Payment Information</label>
+                    <div id="card-element" class="p-3 rounded bg-gray-700 border border-gray-600">
+                        <!-- Stripe Card Element will be inserted here -->
+                    </div>
+                    <div id="card-errors" class="text-red-500 text-sm mt-2 hidden"></div>
                 </div>
 
-                <div id="card-errors" class="text-red-500 text-center hidden"></div>
+                <div id="errorMessage" class="text-red-500 text-center p-3 bg-red-500/10 rounded border border-red-500/20 hidden"></div>
 
-                <button type="submit" 
-                        class="w-full bg-blue-600 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+                <button type="submit" id="submitButton" 
+                        class="w-full bg-blue-600 py-3 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50">
                     Create Account
                 </button>
+                
+                <div class="text-xs text-gray-400 mt-2">
+                    By creating an account, you agree to our 
+                    <a href="/terms" class="text-blue-400">Terms of Service</a> and 
+                    <a href="/privacy" class="text-blue-400">Privacy Policy</a>
+                </div>
             </form>
 
-            <div class="mt-4 text-center">
+            <div class="mt-6 text-center">
                 <p class="text-gray-400">Already have an account? 
-                    <a href="/login" class="text-blue-400 hover:text-blue-300">Sign in</a>
+                    <a href="/login" class="text-blue-400 hover:text-blue-300 font-medium">Sign in</a>
                 </p>
             </div>
         </div>
     </div>
 
+    <!-- Scripts -->
+    <script src="/scripts/auth.js"></script>
     <script>
+        // Initialize Stripe
         const stripe = Stripe('your_publishable_key');
         const elements = stripe.elements();
-        const card = elements.create('card');
+        
+        // Create card element
+        const cardElementOptions = {
+            style: {
+                base: {
+                    color: '#ffffff',
+                    fontFamily: '"Inter", sans-serif',
+                    fontSmoothing: 'antialiased',
+                    fontSize: '16px',
+                    '::placeholder': {
+                        color: '#9ca3af'
+                    }
+                },
+                invalid: {
+                    color: '#ef4444',
+                    iconColor: '#ef4444'
+                }
+            }
+        };
+        
+        const card = elements.create('card', cardElementOptions);
         card.mount('#card-element');
-
+        
+        // Handle card element errors
+        card.on('change', function(event) {
+            const displayError = document.getElementById('card-errors');
+            if (event.error) {
+                displayError.textContent = event.error.message;
+                displayError.classList.remove('hidden');
+            } else {
+                displayError.textContent = '';
+                displayError.classList.add('hidden');
+            }
+        });
+        
+        // Form submission
         const form = document.getElementById('signupForm');
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            const subscription = document.querySelector('input[name="subscription"]:checked').value;
-            const priceId = document.querySelector('input[name="subscription"]:checked').dataset.price;
-
-            try {
-                const { paymentMethod } = await stripe.createPaymentMethod({
-                    type: 'card',
-                    card: card,
-                });
-
-                const response = await fetch('/api/create-subscription', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        email,
-                        paymentMethodId: paymentMethod.id,
-                        priceId
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok) {
-                    const { clientSecret } = data;
-                    
-                    const { error } = await stripe.confirmCardPayment(clientSecret);
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                // Get form values
+                const email = document.getElementById('email').value.trim();
+                const password = document.getElementById('password').value;
+                const errorMessage = document.getElementById('errorMessage');
+                const submitButton = form.querySelector('button[type="submit"]');
+                
+                // Reset error messages
+                if (errorMessage) {
+                    errorMessage.classList.add('hidden');
+                }
+                
+                // Basic validation
+                if (!email || !password) {
+                    if (errorMessage) {
+                        errorMessage.textContent = 'Please enter both email and password';
+                        errorMessage.classList.remove('hidden');
+                    }
+                    return;
+                }
+                
+                if (password.length < 8) {
+                    if (errorMessage) {
+                        errorMessage.textContent = 'Password must be at least 8 characters';
+                        errorMessage.classList.remove('hidden');
+                    }
+                    return;
+                }
+                
+                // Show loading state
+                const originalButtonText = submitButton.textContent;
+                submitButton.disabled = true;
+                submitButton.textContent = 'Processing...';
+                document.getElementById('loadingOverlay').classList.remove('hidden');
+                
+                try {
+                    // Create Stripe payment method
+                    const { paymentMethod, error } = await stripe.createPaymentMethod({
+                        type: 'card',
+                        card: card,
+                        billing_details: {
+                            email: email
+                        }
+                    });
                     
                     if (error) {
                         throw new Error(error.message);
                     }
-
-                    // Create user account
-                    const userResponse = await fetch('/api/auth/signup', {
+                    
+                    // Get subscription plan
+                    const selectedPlan = document.querySelector('input[name="subscription"]:checked');
+                    const subscription = selectedPlan.value;
+                    const priceId = selectedPlan.dataset.price;
+                    
+                    // Submit signup request
+                    const response = await fetch('/api/auth/signup', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -121,27 +273,168 @@
                         body: JSON.stringify({
                             email,
                             password,
-                            subscription
+                            subscription,
+                            priceId,
+                            paymentMethodId: paymentMethod.id
                         })
                     });
-
-                    const userData = await userResponse.json();
                     
-                    if (userResponse.ok) {
-                        localStorage.setItem('token', userData.token);
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        // Store auth data
+                        localStorage.setItem('token', data.token);
+                        
+                        if (data.user) {
+                            localStorage.setItem('userEmail', data.user.email);
+                            if (data.user.subscription) {
+                                localStorage.setItem('userSubscription', data.user.subscription);
+                            }
+                        }
+                        
+                        // Redirect to dashboard
                         window.location.href = '/dashboard';
                     } else {
-                        throw new Error(userData.error);
+                        // Show error
+                        if (errorMessage) {
+                            errorMessage.textContent = data.error || 'Signup failed';
+                            errorMessage.classList.remove('hidden');
+                        }
+                        
+                        // Reset UI
+                        submitButton.disabled = false;
+                        submitButton.textContent = originalButtonText;
+                        document.getElementById('loadingOverlay').classList.add('hidden');
                     }
-                } else {
-                    throw new Error(data.error);
+                } catch (error) {
+                    console.error('Signup error:', error);
+                    
+                    // Show error
+                    if (errorMessage) {
+                        errorMessage.textContent = error.message || 'Connection error. Please try again.';
+                        errorMessage.classList.remove('hidden');
+                    }
+                    
+                    // Reset UI
+                    submitButton.disabled = false;
+                    submitButton.textContent = originalButtonText;
+                    document.getElementById('loadingOverlay').classList.add('hidden');
                 }
-            } catch (error) {
-                const errorElement = document.getElementById('card-errors');
-                errorElement.textContent = error.message;
-                errorElement.classList.remove('hidden');
+            });
+        }
+        
+        // Handle subscription option selection
+        const subscriptionOptions = document.querySelectorAll('.subscription-option');
+        subscriptionOptions.forEach(option => {
+            const radio = option.querySelector('input[type="radio"]');
+            
+            // Mark initially selected option
+            if (radio.checked) {
+                option.classList.add('selected');
             }
+            
+            // Handle clicks
+            option.addEventListener('click', () => {
+                // Unselect all options
+                subscriptionOptions.forEach(opt => {
+                    opt.classList.remove('selected');
+                    opt.querySelector('input[type="radio"]').checked = false;
+                });
+                
+                // Select this option
+                option.classList.add('selected');
+                radio.checked = true;
+            });
         });
+        
+        // Password strength meter
+        const passwordInput = document.getElementById('password');
+        const passwordStrengthBar = document.getElementById('passwordStrengthBar');
+        const passwordHint = document.getElementById('passwordHint');
+        
+        if (passwordInput && passwordStrengthBar && passwordHint) {
+            passwordInput.addEventListener('input', () => {
+                const value = passwordInput.value;
+                let strength = 0;
+                let message = '';
+                
+                // Basic length check
+                if (value.length >= 8) {
+                    strength += 25;
+                }
+                
+                // Check for uppercase
+                if (/[A-Z]/.test(value)) {
+                    strength += 25;
+                }
+                
+                // Check for numbers
+                if (/[0-9]/.test(value)) {
+                    strength += 25;
+                }
+                
+                // Check for special characters
+                if (/[^A-Za-z0-9]/.test(value)) {
+                    strength += 25;
+                }
+                
+                // Update strength bar
+                passwordStrengthBar.style.width = strength + '%';
+                
+                // Update color
+                if (strength <= 25) {
+                    passwordStrengthBar.className = 'h-1 bg-red-500 rounded-l';
+                    message = 'Password is too weak';
+                } else if (strength <= 50) {
+                    passwordStrengthBar.className = 'h-1 bg-yellow-500 rounded-l';
+                    message = 'Password is moderate';
+                } else if (strength <= 75) {
+                    passwordStrengthBar.className = 'h-1 bg-blue-500 rounded-l';
+                    message = 'Password is good';
+                } else {
+                    passwordStrengthBar.className = 'h-1 bg-green-500 rounded-l';
+                    message = 'Password is strong';
+                }
+                
+                // Update hint
+                passwordHint.textContent = value.length > 0 ? message : 'Password must be at least 8 characters';
+            });
+        }
+        
+        // Toggle password visibility
+        const togglePassword = document.getElementById('togglePassword');
+        if (togglePassword && passwordInput) {
+            togglePassword.addEventListener('click', () => {
+                const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+                passwordInput.setAttribute('type', type);
+                
+                // Update icon
+                if (type === 'password') {
+                    togglePassword.innerHTML = `<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>`;
+                } else {
+                    togglePassword.innerHTML = `<svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                    </svg>`;
+                }
+            });
+        }
+        
+        // Email validation
+        const emailInput = document.getElementById('email');
+        const emailValidIcon = document.getElementById('emailValidIcon');
+        const emailError = document.getElementById('emailError');
+        
+        if (emailInput && emailValidIcon && emailError) {
+            emailInput.addEventListener('input', () => {
+                const isValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailInput.value);
+                emailValidIcon.style.opacity = isValid ? '1' : '0';
+                emailError.textContent = isValid ? '' : 'Please enter a valid email address';
+                emailError.classList.toggle('hidden', isValid);
+            });
+        }
     </script>
 </body>
 </html>

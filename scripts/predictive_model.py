@@ -11,7 +11,7 @@ import gc
 import signal
 import time
 from datetime import datetime, timedelta
-from typing import Dict, List, Union, Optional
+from typing import Dict, List, Union, Optional, Tuple
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from logging.handlers import RotatingFileHandler
@@ -42,6 +42,7 @@ import redis
 from prometheus_client import Counter, Histogram, Gauge
 import psutil
 from cachetools import TTLCache, LRUCache
+from advanced_analytics import AdvancedAnalytics
 
 # Suppress warnings
 warnings.filterwarnings('ignore')
@@ -144,6 +145,17 @@ class PredictionRequest:
     prediction_type: str
     input_data: Dict
     factors: Optional[List[Dict]] = None
+
+@dataclass
+class PredictionResult:
+    """Prediction result data structure"""
+    probability: float
+    confidence: float
+    factors: List[str]
+    timestamp: datetime
+    risk_score: float
+    market_sentiment: float
+    advanced_metrics: Dict
 
 class MemoryMonitor:
     def __init__(self, threshold_mb: int = 4096, critical_threshold_mb: int = 6144, check_interval: int = 60):
@@ -368,6 +380,9 @@ class TheAnalyzerPredictiveModel:
 
         # Initialize monitoring
         self._start_monitoring()
+
+        # Initialize advanced analytics
+        self.advanced_analytics = AdvancedAnalytics()
 
     def _verify_mongodb_connection(self):
         try:

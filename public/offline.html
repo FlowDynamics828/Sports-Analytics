@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>You're Offline | Sports Analytics Pro</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-light: #3b82f6;
+            --primary-dark: #1d4ed8;
+            --accent: #06b6d4;
+            --dark: #0f172a;
+            --darker: #080e1c;
+            --light: #f1f5f9;
+            --light-gray: #94a3b8;
+            --gray: #64748b;
+            --border-color: rgba(148, 163, 184, 0.1);
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            color: var(--light);
+            background-color: var(--dark);
+            line-height: 1.6;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 1rem;
+            background-image: 
+                radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+            background-size: 30px 30px;
+        }
+        
+        .offline-container {
+            max-width: 500px;
+            padding: 2rem;
+            background-color: rgba(15, 23, 42, 0.7);
+            border-radius: 1rem;
+            border: 1px solid var(--border-color);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        
+        .offline-icon {
+            font-size: 4rem;
+            margin-bottom: 1.5rem;
+            color: var(--primary-light);
+            animation: pulse 2s ease-in-out infinite;
+        }
+        
+        h1 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+        
+        p {
+            color: var(--light-gray);
+            margin-bottom: 1.5rem;
+        }
+        
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            font-size: 0.95rem;
+            font-weight: 500;
+            text-align: center;
+            text-decoration: none;
+            border-radius: 0.375rem;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            color: white;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 0.6; transform: scale(0.98); }
+            50% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0.6; transform: scale(0.98); }
+        }
+        
+        footer {
+            margin-top: 3rem;
+            font-size: 0.85rem;
+            color: var(--gray);
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-container">
+        <i class="fas fa-wifi-slash offline-icon"></i>
+        <h1>You're Offline</h1>
+        <p>It looks like you're not connected to the internet. Please check your connection and try again.</p>
+        <button class="btn try-reconnect">Try Again</button>
+    </div>
+    
+    <footer>
+        &copy; Sports Analytics Pro | <span id="current-year">2025</span>
+    </footer>
+    
+    <script>
+        // Update year automatically
+        document.getElementById('current-year').textContent = new Date().getFullYear();
+        
+        // Try to reconnect
+        document.querySelector('.try-reconnect').addEventListener('click', () => {
+            window.location.reload();
+        });
+    </script>
+</body>
+</html>

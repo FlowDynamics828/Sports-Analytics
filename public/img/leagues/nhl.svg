@@ -1,0 +1,5 @@
+<svg width="100" height="100" xmlns="http://www.w3.org/2000/svg">
+  <rect x="5" y="5" width="90" height="90" rx="5" fill="#041E42" stroke="#FFFFFF" stroke-width="2"/>
+  <path d="M20,35 L40,25 L60,35 L80,25 L80,40 L60,55 L40,45 L20,55 L20,35" fill="none" stroke="#FFFFFF" stroke-width="2"/>
+  <text x="50%" y="75%" font-family="Arial" font-size="24" font-weight="bold" fill="white" text-anchor="middle" dominant-baseline="middle">NHL</text>
+</svg> 

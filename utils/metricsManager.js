@@ -72,6 +72,7 @@ class MetricsManager extends EventEmitter {
   #instanceId = crypto.randomBytes(16).toString('hex');
   #enhancedCollectors = new Map();
   #intervals = [];
+  #cleanupInterval = 3600000; // 1 hour
 
   /**
    * Private constructor to allow rapid, parallel instances
@@ -130,6 +131,8 @@ class MetricsManager extends EventEmitter {
 
     // Register this instance temporarily
     MetricsManager.#instances.set(this.#instanceId, this);
+
+    setInterval(() => this.cleanupOldMetrics(), this.#cleanupInterval);
 
     return this;
   }
@@ -664,8 +667,8 @@ class MetricsManager extends EventEmitter {
     const p95Index = Math.floor(sorted.length * 0.95);
     const p99Index = Math.floor(sorted.length * 0.99);
 
-    latencyData.p95 = sorted[p95Index] || 0;
-    latitudeData.p99 = sorted[p99Index] || 0;
+latencyData.p95 = sorted[p95Index] || 0;
+latencyData.p99 = sorted[p99Index] || 0;
   }
 
   /**
@@ -850,28 +853,10 @@ class MetricsManager extends EventEmitter {
    * @param {Object} metrics Metrics object to clean
    */
   cleanupOldMetrics(metrics) {
-    const ONE_HOUR = 60 * 60 * 1000; // Convert to milliseconds
-    const now = Date.now();
-
-    if (Array.isArray(metrics)) {
-      return metrics.filter(entry => 
-        entry.timestamp && (now - entry.timestamp) <= ONE_HOUR
-      );
-    }
-
-    if (typeof metrics === 'object' && metrics !== null) {
-      Object.keys(metrics).forEach(key => {
-        if (Array.isArray(metrics[key])) {
-          metrics[key] = metrics[key].filter(entry =>
-            !entry.timestamp || (now - entry.timestamp) <= ONE_HOUR
-          );
-        } else if (typeof metrics[key] === 'object' && metrics[key] !== null) {
-          metrics[key] = this.cleanupOldMetrics(metrics[key]);
-        }
-      });
-    }
-
-    return metrics;
+    const oneHourAgo = Date.now() - this.#cleanupInterval;
+    this.#metrics.forEach((values, name) => {
+      this.#metrics.set(name, values.filter(v => v.timestamp > oneHourAgo));
+    });
   }
 
   /**
@@ -1140,4 +1125,4 @@ class MetricsManager extends EventEmitter {
 Object.freeze(MetricsManager.prototype);
 
 // Export the class
-module.exports = MetricsManager;
+module.exports = { MetricsManager };

@@ -3,28 +3,114 @@ const NodeCache = require('node-cache');
 const winston = require('winston');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
+const redis = require('redis');
+const { promisify } = require('util');
+const { LogManager } = require('./logger');
 
 // Configure logging
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    }),
-    new winston.transports.File({ 
-      filename: 'logs/cache-error.log', 
-      level: 'error' 
-    })
-  ]
-});
+const logger = new LogManager().logger;
+
+// Redis client and cache
+let client;
+let cache;
+
+/**
+ * Initialize Redis connection with proper error handling
+ * @returns {Promise<boolean>} Whether Redis is successfully initialized
+ */
+async function initializeRedis() {
+    try {
+        if (process.env.USE_REDIS !== 'true' || process.env.USE_IN_MEMORY_CACHE === 'true') {
+            logger.info('Redis is disabled by configuration, using in-memory cache');
+            fallbackToMemoryCache();
+            return false;
+        }
+
+        const RedisClient = redis.createClient({
+            url: process.env.REDIS_URL || `redis://${process.env.REDIS_HOST || 'localhost'}:${process.env.REDIS_PORT || 6379}`,
+            password: process.env.REDIS_PASSWORD,
+            socket: {
+                connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT, 10) || 10000
+            },
+            retry_strategy: function(times) {
+                const delay = Math.min(times * 50, parseInt(process.env.REDIS_RETRY_STRATEGY_MAX_DELAY, 10) || 2000);
+                logger.info(`Redis connection retry attempt ${times} after ${delay}ms`);
+                return delay;
+            }
+        });
+
+        // Set up event handlers
+        RedisClient.on('error', (err) => {
+            logger.error('Redis connection error:', err);
+            fallbackToMemoryCache();
+        });
+
+        await RedisClient.connect();
+        
+        // Test connection
+        const pingResult = await RedisClient.ping();
+        if (pingResult !== 'PONG') {
+            throw new Error('Redis ping failed');
+        }
+        
+        cache = {
+            get: async (key) => {
+                const result = await RedisClient.get(key);
+                return result ? JSON.parse(result) : null;
+            },
+            set: async (key, value, ttl) => {
+                const options = ttl ? { EX: ttl } : {};
+                return await RedisClient.set(key, JSON.stringify(value), options);
+            },
+            del: async (key) => {
+                return await RedisClient.del(key);
+            }
+        };
+        
+        logger.info('Redis connected and ready');
+        return true;
+    } catch (error) {
+        logger.error('Redis initialization failed, falling back to in-memory cache:', error);
+        fallbackToMemoryCache();
+        return false;
+    }
+}
+
+function fallbackToMemoryCache() {
+    logger.info('Using in-memory NodeCache as fallback for Redis');
+    
+    // Create more robust memory cache with NodeCache instead of simple Map
+    const memoryCache = new NodeCache({
+        stdTTL: parseInt(process.env.CACHE_DEFAULT_TTL, 10) || 3600, // 1 hour default TTL
+        checkperiod: parseInt(process.env.CACHE_CHECK_PERIOD, 10) || 600, // 10 minutes cleanup interval
+        useClones: false // For better performance
+    });
+    
+    cache = {
+        get: async (key) => {
+            const value = memoryCache.get(key);
+            return value === undefined ? null : value;
+        },
+        set: async (key, value, ttl = 0) => {
+            return memoryCache.set(key, value, ttl);
+        },
+        del: async (key) => {
+            return memoryCache.del(key);
+        },
+        keys: async (pattern = '*') => {
+            // Simple implementation that returns all keys (no pattern matching)
+            return memoryCache.keys();
+        },
+        flushAll: async () => {
+            return memoryCache.flushAll();
+        },
+        getStats: () => {
+            return memoryCache.getStats();
+        }
+    };
+    
+    logger.info(`In-memory cache initialized with ${memoryCache.options.stdTTL}s TTL`);
+}
 
 /**
  * Enterprise-grade cache manager with Redis integration and memory optimization
@@ -414,4 +500,8 @@ class CacheManager {
   }
 }
 
-module.exports = { CacheManager };
+module.exports = {
+  CacheManager,
+  initializeRedis,
+  fallbackToMemoryCache
+};

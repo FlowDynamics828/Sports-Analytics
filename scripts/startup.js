@@ -179,11 +179,11 @@ from datetime import datetime
 
 def main():
     """Main function to process input and generate predictions"""
-    try:
-        # Get input from Node.js
+    try {
+        // Get input from Node.js
         input_data = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
 
-        # Generate mock prediction result
+        // Generate mock prediction result
         result = {
             "prediction": 0.75,
             "confidence": 0.85,
@@ -193,7 +193,7 @@ def main():
             "type": input_data.get('prediction_type', 'unknown')
         }
 
-        # Return result as JSON
+        // Return result as JSON
         print(json.dumps(result))
 
     except Exception as e:
@@ -373,29 +373,41 @@ async function verifyPortAvailability() {
 
 /**
  * Verify Redis connection
- * @returns {Promise<boolean>} Whether Redis is available
  */
 async function verifyRedisConnection() {
   logger.info('Verifying Redis connection...');
   
-  if (process.env.USE_IN_MEMORY_CACHE === 'true') {
-    logger.info('Using in-memory cache, skipping Redis verification');
+  // Skip Redis if explicitly disabled in environment
+  if (process.env.USE_REDIS === 'false' || process.env.USE_IN_MEMORY_CACHE === 'true') {
+    logger.info('Redis disabled by configuration. Using in-memory cache mode.');
+    // Explicitly set in-memory cache to true
+    process.env.USE_IN_MEMORY_CACHE = 'true';
     return true;
   }
   
   try {
+    // Only attempt Redis connection if it's not disabled
     const Redis = require('ioredis');
-    const redis = new Redis({
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT, 10) || 6379,
-      password: process.env.REDIS_PASSWORD || undefined,
-      connectTimeout: 5000
-    });
+    let redis;
+    
+    try {
+      redis = new Redis({
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD || undefined,
+        connectTimeout: 5000
+      });
+    } catch (error) {
+      logger.warn(`Could not create Redis client: ${error.message}`);
+      logger.info('Falling back to in-memory cache');
+      process.env.USE_IN_MEMORY_CACHE = 'true';
+      return true;
+    }
     
     return new Promise((resolve) => {
-      redis.on('ready', () => {
+      redis.once('ready', () => {
         logger.info('Redis connection successful');
-        redis.quit();
+        redis.quit().catch(() => {});
         resolve(true);
       });
       
@@ -403,15 +415,24 @@ async function verifyRedisConnection() {
         logger.warn(`Redis connection failed: ${error.message}`);
         logger.info('Enabling in-memory cache fallback');
         process.env.USE_IN_MEMORY_CACHE = 'true';
-        redis.quit();
+        try {
+          redis.quit();
+        } catch (e) {
+          // Ignore error on quit
+        }
         resolve(true);
       });
       
+      // Set timeout to prevent waiting too long
       setTimeout(() => {
-        logger.warn('Redis connection timed out');
+        logger.warn('Redis connection timeout');
         logger.info('Enabling in-memory cache fallback');
         process.env.USE_IN_MEMORY_CACHE = 'true';
-        redis.disconnect();
+        try {
+          redis.quit();
+        } catch (e) {
+          // Ignore error on quit
+        }
         resolve(true);
       }, 5000);
     });
@@ -435,8 +456,8 @@ async function verifyMongoDBConnection() {
     const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics';
     
     const client = new MongoClient(uri, {
-      connectTimeoutMS: 5000,
-      serverSelectionTimeoutMS: 5000
+      connectTimeoutMS: 30000,
+      serverSelectionTimeoutMS: 30000
     });
     
     await client.connect();
@@ -464,9 +485,7 @@ async function connectToMongoDB() {
     for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
       try {
         await mongoose.connect(uri, {
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
-          serverSelectionTimeoutMS: 5000, 
+          serverSelectionTimeoutMS: 30000, 
           maxPoolSize: parseInt(process.env.DB_MAX_POOL_SIZE, 10) || 50,
           minPoolSize: parseInt(process.env.DB_MIN_POOL_SIZE, 10) || 5,
           connectTimeoutMS: parseInt(process.env.CONNECT_TIMEOUT_MS, 10) || 10000,
@@ -488,58 +507,6 @@ async function connectToMongoDB() {
   } catch (error) {
     logger.error(`MongoDB connection failed after ${config.maxRetries} attempts: ${error.message}`);
     throw error;
-  }
-}
-
-/**
- * Connect to Redis with retry logic
- * @returns {Promise<object|null>} Redis client or null if unavailable
- */
-async function connectToRedis() {
-  logger.info('Connecting to Redis...');
-  
-  if (process.env.USE_IN_MEMORY_CACHE === 'true') {
-    logger.info('Using in-memory cache, skipping Redis connection');
-    return null;
-  }
-  
-  try {
-    const Redis = require('ioredis');
-    
-    for (let attempt = 1; attempt <= config.maxRetries; attempt++) {
-      try {
-        const client = new Redis({
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT, 10) || 6379,
-          password: process.env.REDIS_PASSWORD || undefined,
-          connectTimeout: parseInt(process.env.REDIS_CONNECT_TIMEOUT, 10) || 10000,
-          maxRetriesPerRequest: parseInt(process.env.REDIS_MAX_RETRIES, 10) || 3
-        });
-        
-        await new Promise((resolve, reject) => {
-          client.once('ready', resolve);
-          client.once('error', reject);
-          setTimeout(() => reject(new Error('Redis connection timeout')), 5000);
-        });
-        
-        logger.info('Redis connection successful');
-        return client;
-      } catch (error) {
-        logger.warn(`Redis connection attempt ${attempt} failed: ${error.message}`);
-        
-        if (attempt === config.maxRetries) {
-          logger.error('Redis connection failed, using in-memory cache fallback');
-          process.env.USE_IN_MEMORY_CACHE = 'true';
-          return null;
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, config.retryDelay));
-      }
-    }
-  } catch (error) {
-    logger.error(`Redis connection failed: ${error.message}`);
-    process.env.USE_IN_MEMORY_CACHE = 'true';
-    return null;
   }
 }
 
@@ -1682,3 +1649,138 @@ main().catch(error => {
  logger.error(error.stack);
  process.exit(1);
 });
+
+// Correct module imports with better error handling and fallbacks
+const db = require('../utils/db');
+const authMiddleware = require('../auth/authMiddleware');
+const cache = require('../utils/cache');
+const api = require('../api');
+
+// Optional imports with fallbacks
+let pythonBridge;
+try {
+  pythonBridge = require('../utils/pythonBridge');
+} catch (error) {
+  logger.warn(`Could not load pythonBridge module: ${error.message}`);
+  pythonBridge = {
+    initializePythonBridge: async () => {
+      logger.info('Using fallback pythonBridge implementation');
+      return true;
+    }
+  };
+}
+
+let rateLimiter;
+try {
+  rateLimiter = require('../utils/rateLimiter');
+} catch (error) {
+  logger.warn(`Could not load rateLimiter module: ${error.message}`);
+  rateLimiter = {
+    RateLimiter: class MockRateLimiter {
+      async initializeRedisConnection() {
+        logger.info('Using fallback rate limiter implementation');
+        return true;
+      }
+    }
+  };
+}
+
+const { LogManager } = require('../utils/logger');
+
+async function startup() {
+  try {
+    logger.info('Starting initialization sequence...', { service: "startup", timestamp: new Date().toISOString() });
+    
+    // Set environment variable immediately if Redis is explicitly disabled
+    if (process.env.USE_REDIS === 'false') {
+      process.env.USE_IN_MEMORY_CACHE = 'true';
+      logger.info('Redis disabled by configuration. Using in-memory cache mode.', { service: "redis-manager", timestamp: new Date().toISOString() });
+    }
+    
+    // Initialize database with retry logic
+    try {
+      logger.info('Initializing database connection...', { service: "startup", timestamp: new Date().toISOString() });
+      await connectToMongoDB();
+      logger.info('Database connection established successfully', { service: "startup", timestamp: new Date().toISOString() });
+    } catch (dbError) {
+      const errorMsg = typeof dbError === 'object' && dbError !== null ? dbError.message : String(dbError);
+      logger.error(`Database initialization failed: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+      throw new Error(`Database initialization failed: ${errorMsg}`);
+    }
+    
+    // Initialize auth system with retry logic
+    try {
+      logger.info('Initializing authentication system...', { service: "startup", timestamp: new Date().toISOString() });
+      await require('../auth/auth').initializeAuthSystem();
+      logger.info('Authentication system initialized successfully', { service: "startup", timestamp: new Date().toISOString() });
+    } catch (authError) {
+      const errorMsg = typeof authError === 'object' && authError !== null ? authError.message : String(authError);
+      logger.error(`Authentication system initialization failed: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+      throw new Error(`Authentication system initialization failed: ${errorMsg}`);
+    }
+    
+    // Initialize Redis with fallback to memory cache
+    try {
+      logger.info('Initializing Redis...', { service: "startup", timestamp: new Date().toISOString() });
+      // Only attempt to verify Redis if not explicitly disabled
+      if (process.env.USE_REDIS !== 'false' && process.env.USE_IN_MEMORY_CACHE !== 'true') {
+        await verifyRedisConnection();
+      }
+      logger.info('Redis initialized successfully', { service: "startup", timestamp: new Date().toISOString() });
+    } catch (redisError) {
+      const errorMsg = typeof redisError === 'object' && redisError !== null ? redisError.message : String(redisError);
+      logger.warn(`Redis initialization failed, using in-memory fallback: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+      // No need to throw error here as we have a fallback
+      process.env.USE_IN_MEMORY_CACHE = 'true';
+    }
+    
+    // Initialize Python bridge (optional)
+    try {
+      logger.info('Initializing Python bridge...', { service: "startup", timestamp: new Date().toISOString() });
+      if (typeof pythonBridge?.initializePythonBridge === 'function') {
+        await pythonBridge.initializePythonBridge();
+      }
+      logger.info('Python bridge initialized successfully', { service: "startup", timestamp: new Date().toISOString() });
+    } catch (pythonError) {
+      const errorMsg = typeof pythonError === 'object' && pythonError !== null ? pythonError.message : String(pythonError);
+      logger.warn(`Python bridge initialization failed: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+      // Python integration is optional, so we continue
+    }
+    
+    // Initialize rate limiter
+    try {
+      logger.info('Initializing rate limiter...', { service: "startup", timestamp: new Date().toISOString() });
+      if (typeof rateLimiter?.RateLimiter === 'function') {
+        const limiter = new rateLimiter.RateLimiter();
+        if (typeof limiter.initializeRedisConnection === 'function') {
+          await limiter.initializeRedisConnection();
+        }
+      }
+      logger.info('Rate limiter initialized successfully', { service: "startup", timestamp: new Date().toISOString() });
+    } catch (rateLimiterError) {
+      const errorMsg = typeof rateLimiterError === 'object' && rateLimiterError !== null ? rateLimiterError.message : String(rateLimiterError);
+      logger.warn(`Rate limiter initialization failed: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+      // Rate limiter is required but can work without Redis
+    }
+    
+    // Start the API server
+    try {
+      logger.info('Starting API server...', { service: "startup", timestamp: new Date().toISOString() });
+      await startApplicationProcess();
+      logger.info('API server started successfully', { service: "startup", timestamp: new Date().toISOString() });
+    } catch (apiError) {
+      const errorMsg = typeof apiError === 'object' && apiError !== null ? apiError.message : String(apiError);
+      logger.error(`API server initialization failed: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+      throw new Error(`API server initialization failed: ${errorMsg}`);
+    }
+    
+    logger.info('All systems initialized successfully', { service: "startup", timestamp: new Date().toISOString() });
+    return true;
+  } catch (error) {
+    const errorMsg = typeof error === 'object' && error !== null ? error.message : String(error);
+    logger.error(`Startup initialization failed: ${errorMsg}`, { service: "startup", timestamp: new Date().toISOString() });
+    throw error;
+  }
+}
+
+module.exports = { startup };

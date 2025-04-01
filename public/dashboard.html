@@ -2,1104 +2,788 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Sports Analytics Pro - Premium Analytics Dashboard</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <title>SportsAnalytics Pro - Enterprise Dashboard</title>
+    
+    <!-- Performance optimization: preload critical resources -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" as="style">
+    <link rel="preload" href="premium-dashboard.css" as="style">
+    
+    <!-- Fonts and icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-    <link href="/dashboard/styles/dashboard.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Stylesheets -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link href="premium-dashboard.css" rel="stylesheet">
+    
+    <!-- Inline critical CSS for faster loading -->
+    <style>
+        /* Critical styles for initial loading */
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(59, 130, 246, 0.3);
+            border-radius: 50%;
+            border-top-color: #3b82f6;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Toast styling */
+        #toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 50;
+        }
+        
+        .toast {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 0.375rem;
+            background-color: #1f2937;
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: all 0.3s ease;
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .toast.success {
+            background-color: #065f46;
+        }
+        
+        .toast.error {
+            background-color: #991b1b;
+        }
+        
+        .toast.warning {
+            background-color: #92400e;
+        }
+        
+        .toast.info {
+            background-color: #1e40af;
+        }
+    </style>
+    
+    <!-- SEO meta tags -->
+    <meta name="description" content="Enterprise-grade sports analytics platform with advanced insights, real-time data, and AI-powered predictions.">
+    <meta name="keywords" content="sports analytics, sports data, AI predictions, sports statistics, premium sports dashboard">
+    <meta name="author" content="SportsAnalytics Pro">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="favicon.png">
+    
+    <!-- Web app manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#111827">
+    
+    <!-- iOS specific -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    
+    <!-- Open Graph / Social media meta tags -->
+    <meta property="og:title" content="SportsAnalytics Pro - Enterprise Dashboard">
+    <meta property="og:description" content="Enterprise-grade sports analytics platform with advanced insights, real-time data, and AI-powered predictions.">
+    <meta property="og:image" content="og-image.jpg">
+    <meta property="og:url" content="https://sportsanalyticspro.com/dashboard">
+    <meta property="og:type" content="website">
+    
+    <!-- Twitter Card data -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="SportsAnalytics Pro - Enterprise Dashboard">
+    <meta name="twitter:description" content="Enterprise-grade sports analytics platform with advanced insights, real-time data, and AI-powered predictions.">
+    <meta name="twitter:image" content="og-image.jpg">
+    
+    <!-- Preloading critical JS -->
+    <link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/chart.js">
+    
+    <!-- Authentication check -->
+    <script>
+        // Redirect to login if no token
+        (function() {
+            if (!localStorage.getItem('token') && !window.location.pathname.includes('/login')) {
+                window.location.href = '/login';
+            }
+        })();
+    </script>
 </head>
-<body class="bg-gray-900 text-white antialiased">
-    <!-- Global Loading Overlay -->
-    <div id="globalLoadingOverlay" class="fixed inset-0 bg-gray-900/80 z-50 flex items-center justify-center">
-        <div class="bg-gray-800 p-8 rounded-lg shadow-xl text-center">
-            <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-t-4 border-blue-500 mx-auto"></div>
-            <p id="loadingMessage" class="mt-6 text-xl">Loading your analytics dashboard...</p>
-            <p class="text-gray-400 mt-2">Analyzing data from across the league</p>
+<body class="bg-gray-900 text-white font-inter antialiased h-screen overflow-hidden flex flex-col">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-gray-900 bg-opacity-90 flex flex-col items-center justify-center z-50 transition-opacity duration-500">
+        <div class="loading-spinner mb-4"></div>
+        <div class="text-xl text-white mb-8">Loading your premium dashboard...</div>
+        <div class="w-64 bg-gray-700 rounded-full h-3 overflow-hidden">
+            <div id="loading-progress-bar" class="bg-gradient-to-r from-blue-500 to-indigo-600 h-full w-0 transition-all duration-200"></div>
         </div>
     </div>
 
-    <!-- Navigation Header -->
-    <header class="bg-gradient-to-r from-gray-900 to-gray-800 border-b border-blue-900/30 fixed w-full z-40 transition-all duration-300" id="mainHeader">
-        <div class="container mx-auto px-4">
-            <div class="flex justify-between items-center h-16">
-                <!-- Logo & Brand -->
-                <div class="flex items-center">
-                    <a href="/" class="flex items-center">
-                        <div class="text-blue-500 mr-2">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col items-end space-y-2"></div>
+    
+    <!-- Application Layout -->
+    <div class="flex h-screen overflow-hidden" id="app-container">
+        <!-- Sidebar Navigation -->
+        <aside id="sidebar" class="w-64 bg-gray-800 border-r border-gray-700 h-full flex-shrink-0 shadow-lg transition-all duration-300 transform z-30" data-collapsed="false">
+            <!-- Sidebar Header -->
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+                <a href="dashboard.html" class="flex items-center">
+                    <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center mr-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
                                 <path fill-rule="evenodd" d="M6.672 1.911a1 1 0 10-1.932.518l.259.966a1 1 0 001.932-.518l-.26-.966zM2.429 4.74a1 1 0 10-.517 1.932l.966.259a1 1 0 00.517-1.932l-.966-.26zm8.814-.569a1 1 0 00-1.415-1.414l-.707.707a1 1 0 101.415 1.415l.707-.708zm-7.071 7.072l.707-.707A1 1 0 003.465 9.12l-.708.707a1 1 0 001.415 1.415zm3.2-5.171a1 1 0 00-1.3 1.3l4 10a1 1 0 001.823.075l1.38-2.759 3.018 3.02a1 1 0 001.414-1.415l-3.019-3.02 2.76-1.379a1 1 0 00-.076-1.822l-10-4z" clip-rule="evenodd" />
+                        </svg>
+                    </div>
+                    <div class="text-lg font-bold">
+                        <span class="bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">SportsAnalytics</span>
+                    </div>
+                </a>
+                <button id="toggle-sidebar" class="p-1 rounded-md text-gray-400 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                    </svg>
+                </button>
+            </div>
+            
+            <!-- User Profile -->
+            <div class="p-4 border-b border-gray-700">
+                <div class="flex items-center mb-3">
+                    <div id="userMenuButton" class="relative">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center cursor-pointer">
+                            <span class="font-bold text-sm" id="user-initial">P</span>
+                        </div>
+                        <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-gray-800 flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
                             </svg>
                         </div>
-                        <span class="text-xl font-bold tracking-tight">Sports<span class="text-blue-400">Analytics</span>Pro</span>
-                    </a>
-                    <div class="hidden md:flex ml-10 space-x-2 text-gray-300">
-                        <a href="/dashboard" class="px-3 py-2 rounded-md text-sm font-medium bg-gray-800 text-white">Dashboard</a>
-                        <a href="/predictions" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition duration-150">Predictions</a>
-                        <a href="/analysis" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition duration-150">Deep Analysis</a>
-                        <a href="/trends" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-700 transition duration-150">Trends</a>
+                    </div>
+                    <div class="ml-3">
+                        <div class="font-semibold" id="user-name">Premium User</div>
+                        <div class="text-xs text-gray-400">
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gradient-to-r from-blue-500 to-purple-600 text-white">
+                                PRO
+                            </span>
+                        </div>
                     </div>
                 </div>
-
-                <!-- Right Menu -->
-                <div class="flex items-center space-x-4">
-                    <!-- League Selector -->
-                    <div class="relative" id="leagueDropdown">
-                        <button class="flex items-center space-x-2 bg-gray-800 hover:bg-gray-700 px-3 py-2 rounded-lg transition duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <img id="currentLeagueIcon" src="/assets/icons/leagues/nba.svg" alt="NBA" class="h-5 w-5">
-                            <span id="currentLeagueName">NBA</span>
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            </svg>
-                        </button>
-                        <!-- League Dropdown Menu -->
-                        <div class="absolute right-0 mt-2 w-56 bg-gray-800 rounded-lg shadow-xl z-20 border border-gray-700 hidden" id="leagueMenu">
-                            <div class="p-2">
-                                <div class="text-xs font-semibold text-gray-400 uppercase mb-2 px-3 pt-1">Basketball</div>
-                                <a href="#" data-league="nba" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/nba.svg" alt="NBA" class="h-5 w-5">
-                                    <span>NBA</span>
-                                </a>
-                                <a href="#" data-league="euroleague" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/euroleague.svg" alt="EuroLeague" class="h-5 w-5">
-                                    <span>EuroLeague</span>
-                                </a>
-                                
-                                <div class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3 px-3 pt-1">Football</div>
-                                <a href="#" data-league="nfl" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/nfl.svg" alt="NFL" class="h-5 w-5">
-                                    <span>NFL</span>
-                                </a>
-                                
-                                <div class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3 px-3 pt-1">Soccer</div>
-                                <a href="#" data-league="premierleague" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/premierleague.svg" alt="Premier League" class="h-5 w-5">
-                                    <span>Premier League</span>
-                                </a>
-                                <a href="#" data-league="laliga" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/laliga.svg" alt="La Liga" class="h-5 w-5">
-                                    <span>La Liga</span>
-                                </a>
-                                
-                                <div class="text-xs font-semibold text-gray-400 uppercase mb-2 mt-3 px-3 pt-1">Other</div>
-                                <a href="#" data-league="mlb" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/mlb.svg" alt="MLB" class="h-5 w-5">
-                                    <span>MLB</span>
-                                </a>
-                                <a href="#" data-league="nhl" class="league-option flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <img src="/assets/icons/leagues/nhl.svg" alt="NHL" class="h-5 w-5">
-                                    <span>NHL</span>
-                                </a>
-                            </div>
-                        </div>
+                
+                <!-- User Menu Dropdown -->
+                <div id="userMenu" class="hidden absolute z-50 mt-2 w-48 rounded-md shadow-lg py-1 bg-gray-700 ring-1 ring-black ring-opacity-5 divide-y divide-gray-600">
+                    <div class="py-1">
+                        <a href="/profile" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-600 hover:text-white">
+                            <span class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                                Your Profile
+                            </span>
+                        </a>
+                        <a href="/settings" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-600 hover:text-white">
+                            <span class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                Settings
+                            </span>
+                        </a>
+                        <a href="/subscription" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-600 hover:text-white">
+                            <span class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                                </svg>
+                                Manage Subscription
+                            </span>
+                        </a>
                     </div>
-
-                    <!-- Connection Status -->
-                    <div class="hidden md:flex items-center">
-                        <div class="flex items-center px-3 py-2 rounded-md bg-gray-800">
-                            <span id="connectionStatus" class="text-green-500 mr-2">●</span>
-                            <span id="connectionText" class="text-sm">Connected</span>
-                        </div>
+                    <div class="py-1">
+                        <a href="/help" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-600 hover:text-white">
+                            <span class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                                Help Center
+                            </span>
+                        </a>
                     </div>
-
-                    <!-- User Menu -->
-                    <div class="relative" id="userDropdown">
-                        <button class="flex items-center space-x-2 hover:bg-gray-700 px-3 py-2 rounded-lg transition duration-150 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center">
-                                <span id="userInitials" class="text-sm font-bold">JD</span>
-                            </div>
-                            <div class="hidden md:block text-left">
-                                <div id="userName" class="text-sm font-medium">John Doe</div>
-                                <div class="flex items-center">
-                                    <div id="userSubscription" class="text-xs px-1.5 py-0.5 bg-gradient-to-r from-blue-600 to-blue-400 rounded-sm">Premium</div>
-                                </div>
-                            </div>
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
-                            </svg>
+                    <div class="py-1">
+                        <button id="logoutBtn" class="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-600 hover:text-red-300">
+                            <span class="flex items-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                                </svg>
+                                Sign out
+                            </span>
                         </button>
-                        <!-- User Dropdown Menu -->
-                        <div class="absolute right-0 mt-2 w-48 bg-gray-800 rounded-lg shadow-xl z-20 border border-gray-700 hidden" id="userMenu">
-                            <div class="p-2">
-                                <a href="/profile" class="flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd" />
-                                    </svg>
-                                    <span>Profile</span>
-                                </a>
-                                <a href="/settings" class="flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd" />
-                                    </svg>
-                                    <span>Settings</span>
-                                </a>
-                                <a href="/billing" class="flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-                                        <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd" />
-                                    </svg>
-                                    <span>Billing</span>
-                                </a>
-                                <div class="border-t border-gray-700 my-2"></div>
-                                <a href="#" id="logoutBtn" class="flex items-center space-x-2 px-3 py-2 rounded-md hover:bg-gray-700 text-red-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1V7.414l-5-5H3zm7 7V1.414L15.586 7H10z" clip-rule="evenodd" />
-                                    </svg>
-                                    <span>Log Out</span>
-                                </a>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
+            
+            <!-- League Selector -->
+            <div class="p-4 border-b border-gray-700">
+                <label for="league-selector" class="block text-sm font-medium text-gray-400 mb-2">Select League</label>
+                <select id="league-selector" class="w-full bg-gray-700 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <!-- League options will be populated by simple-init.js -->
+                </select>
         </div>
-    </header>
-
-    <!-- Sidebar and Main Content -->
-    <div class="flex h-screen pt-16">
-        <!-- Sidebar - Hidden on mobile, visible on larger screens -->
-        <aside class="hidden md:block w-64 bg-gray-900 border-r border-gray-800 fixed h-full transition-all duration-300">
-            <div class="h-full flex flex-col overflow-y-auto">
-                <!-- Team Selector -->
-                <div class="px-4 py-4 border-b border-gray-800">
-                    <label class="text-xs text-gray-400 mb-1 block">TEAM FILTER</label>
-                    <div class="relative">
-                        <select id="teamSelect" class="w-full bg-gray-800 border border-gray-700 text-white py-2 px-3 pr-8 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 appearance-none">
-                            <option value="">All Teams</option>
-                            <!-- Teams will be populated here -->
+            
+            <!-- Team Selector -->
+            <div class="p-4 border-b border-gray-700">
+                <label for="team-selector" class="block text-sm font-medium text-gray-400 mb-2">Select Team</label>
+                <select id="team-selector" class="w-full bg-gray-700 text-white rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="all">All Teams</option>
+                    <!-- Team options will be populated by JavaScript -->
                         </select>
-                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </div>
+            
+            <!-- Navigation Menu -->
+            <div class="py-4">
+                <h3 class="text-xs uppercase font-semibold text-gray-400 tracking-wider mb-3 px-3">Navigation</h3>
+                <ul class="space-y-1">
+                    <li>
+                        <button data-tab="dashboardOverview" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-blue-500 border-blue-500 bg-gray-700 bg-opacity-50">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
                             </svg>
+                            Overview
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardTeams" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                            </svg>
+                            Teams
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardPlayers" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                            Players
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardPredictions" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+                            </svg>
+                            Predictions
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardFixtures" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                            Fixtures
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardLive" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.636 18.364a9 9 0 010-12.728m12.728 0a9 9 0 010 12.728m-9.9-2.829a5 5 0 010-7.07m7.072 0a5 5 0 010 7.07M13 12a1 1 0 11-2 0 1 1 0 012 0z" />
+                            </svg>
+                            Live Games
+                        </button>
+                    </li>
+                </ul>
+                
+                <h3 class="text-xs uppercase font-semibold text-gray-400 tracking-wider mt-6 mb-3 px-3">Analytics</h3>
+                <ul class="space-y-1">
+                    <li>
+                        <button data-tab="dashboardCharts" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                            Charts
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardInsights" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            Insights
+                        </button>
+                    </li>
+                    <li>
+                        <button data-tab="dashboardReports" class="dashboard-tab-button w-full flex items-center px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:text-white hover:bg-gray-700 border-transparent hover:border-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            Reports
+                        </button>
+                    </li>
+                </ul>
                         </div>
+            
+            <!-- Sidebar Footer -->
+            <div class="mt-auto p-4 border-t border-gray-700">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center">
+                        <span id="connectionStatus" class="text-green-500 mr-2">●</span>
+                        <span id="connectionText" class="text-sm">Connected</span>
+                    </div>
+                    <div>
+                        <span class="text-xs text-gray-400">Last updated:</span>
+                        <span id="lastUpdated" class="text-xs text-gray-300">Just now</span>
                     </div>
                 </div>
-
-                <!-- Sidebar Navigation -->
-                <nav class="flex-1 px-2 py-4 space-y-1">
-                    <a href="#overview" class="flex items-center px-3 py-2 text-sm font-medium rounded-md bg-gray-800 text-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z" />
-                        </svg>
-                        Overview
-                    </a>
-                    <a href="#predictions" class="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 hover:text-white transition duration-150">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
-                            <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
-                        </svg>
-                        Predictions
-                    </a>
-                    <a href="#recent-games" class="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 hover:text-white transition duration-150">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clip-rule="evenodd" />
-                        </svg>
-                        Recent Games
-                    </a>
-                    <a href="#performance" class="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-300 hover:bg-gray-800 hover:text-white transition duration-150">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm9 4a1 1 0 10-2 0v6a1 1 0 102 0V7zm-3 2a1 1 0 10-2 0v4a1 1 0 102 0V9zm-3 3a1 1 0 10-2 0v1a1 1 0 102 0v-1z" clip-rule="evenodd" />
-                        </svg>
-                        Performance
-                    </a>
-                </nav>
-
-                <!-- Extra Filters Section -->
-                <div class="px-4 py-4 border-t border-gray-800">
-                    <div class="mb-4">
-                        <label class="text-xs text-gray-400 mb-1 block">TIME PERIOD</label>
-                        <div class="flex flex-wrap gap-2">
-                            <button class="text-xs px-2 py-1 rounded bg-blue-600 text-white">7 Days</button>
-                            <button class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700">30 Days</button>
-                            <button class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700">90 Days</button>
-                            <button class="text-xs px-2 py-1 rounded bg-gray-800 text-gray-300 hover:bg-gray-700">Season</button>
+                
+                <button id="refreshBtn" class="mt-3 w-full flex items-center justify-center px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-md text-sm font-medium transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                    Refresh Data
+                </button>
                         </div>
-                    </div>
-                    
-                    <div class="mb-2">
-                        <label class="text-xs text-gray-400 mb-1 block">VIEW OPTIONS</label>
-                        <div class="space-y-2">
-                            <label class="flex items-center">
-                                <input type="checkbox" class="form-checkbox rounded bg-gray-800 border-gray-700 text-blue-500" checked>
-                                <span class="ml-2 text-sm">Home/Away Splits</span>
-                            </label>
-                            <label class="flex items-center">
-                                <input type="checkbox" class="form-checkbox rounded bg-gray-800 border-gray-700 text-blue-500" checked>
-                                <span class="ml-2 text-sm">Advanced Metrics</span>
-                            </label>
-                            <label class="flex items-center">
-                                <input type="checkbox" class="form-checkbox rounded bg-gray-800 border-gray-700 text-blue-500" checked>
-                                <span class="ml-2 text-sm">Comparative Analysis</span>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Pro Badge - For upselling in non-premium accounts -->
-                <div class="m-4 p-4 rounded-lg bg-gradient-to-r from-blue-900/40 to-purple-900/40 border border-blue-800/50 hidden" id="proBadge">
-                    <div class="flex items-start justify-between">
-                        <div class="text-lg font-bold text-white mb-1">Pro Analytics</div>
-                        <div class="text-xs font-semibold px-1.5 py-0.5 bg-blue-600 rounded-sm">Premium</div>
-                    </div>
-                    <p class="text-sm text-gray-300 mb-3">Unlock our full prediction engine with 94% accuracy rate.</p>
-                    <button class="w-full py-2 px-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-md text-sm font-medium transition duration-150">
-                        Upgrade Now
-                    </button>
-                </div>
-            </div>
         </aside>
-
+        
         <!-- Main Content -->
-        <main class="flex-1 md:ml-64 bg-gray-900">
-            <div class="container mx-auto px-4 py-6">
-                <!-- Dashboard Header with Quick Stats -->
-                <div class="mb-8" id="overview">
-                    <div class="flex items-baseline justify-between mb-6">
-                        <div>
-                            <h1 class="text-3xl font-bold text-white">Dashboard</h1>
-                            <p class="text-gray-400">Real-time analytics for the <span id="dashboardLeagueName">NBA</span></p>
+        <main class="main-content">
+            <!-- Dashboard Content -->
+            <div class="p-6">
+                <!-- Dashboard Tabs -->
+                <div id="dashboardOverview" class="dashboard-tab active">
+                    <!-- Key Metrics -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <div class="stat-card">
+                            <h3>Games Played</h3>
+                            <div id="gamesPlayedMetric" class="stat-value">-</div>
                         </div>
-                        <div class="flex items-center text-sm text-gray-400">
-                            <span>Last updated: </span>
-                            <span id="lastUpdated" class="ml-1">2 minutes ago</span>
-                            <button id="refreshBtn" class="ml-2 text-blue-400 hover:text-blue-300 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" />
-                                </svg>
-                            </button>
+                        <div class="stat-card">
+                            <h3>Average Score</h3>
+                            <div id="averageScoreMetric" class="stat-value">-</div>
                         </div>
-                    </div>
-
-                    <!-- Quick Stats Grid -->
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        <!-- Stat Card 1: Win Rate -->
-                        <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-6 shadow-lg border border-gray-800 hover:border-blue-800/30 transition-all duration-300 hover:-translate-y-1">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-gray-400 text-sm mb-1">Home Win Rate</p>
-                                    <div class="flex items-end">
-                                        <h3 id="winRate" class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-blue-400">74.2%</h3>
-                                        <span class="ml-2 text-sm font-medium text-green-500 flex items-center">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-0.5" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clip-rule="evenodd" />
-                                            </svg>
-                                            3.4%
-                                        </span>
-                                    </div>
-                                </div>
-                                <div class="bg-blue-400/10 p-2 rounded-md">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clip-rule="evenodd" />
-                                    </svg>
-                                </div>
-                            </div>
-                            <div class="mt-2">
-                                <div class="w-full bg-gray-700/30 h-1.5 rounded-full overflow-hidden">
-                                    <div class="bg-gradient-to-r from-blue-500 to-blue-300 h-full rounded-full" style="width: 74.2%"></div>
-                                </div>
-                                <p class="text-gray-500 text-xs mt-1">vs League Avg: 65.8%</p>
-                            </div>
+                        <div class="stat-card">
+                            <h3>Win Rate</h3>
+                            <div id="winRateMetric" class="stat-value">-</div>
                         </div>
-
-                        <!-- Stat Card 2: Average Score -->
-                        <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-6 shadow-lg border border-gray-800 hover:border-blue-800/30 transition-all duration-300 hover:-translate-y-1">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-gray-400 text-sm mb-1">Average Score</p>
-                                    <div class="flex items-end">
-                                        <h3 id="avgScore" class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-blue-400">109.6</h3>
-                                        <span class="ml-2 text-sm font-medium text-red-500 flex items-center">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-0.5" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M12 13a1 1 0 100 2h5a1 1 0 001-1V9a1 1 0 10-2 0v2.586l-4.293-4.293a1 1 0 00-1.414 0L8 9.586 3.707 5.293a1 1 0 00-1.414 1.414l5 5a1 1 0 001.414 0L11 9.414 14.586 13H12z" clip-rule="evenodd" />
-                                            </svg>
-                                            2.1%
-                                        </span>
-                                    </div>
-                                </div>
-                                <div class="bg-blue-400/10 p-2 rounded-md">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M3 3a1 1 0 000 2h10a1 1 0 100-2H3zm0 4a1 1 0 000 2h6a1 1 0 100-2H3zm0 4a1 1 0 100 2h8a1 1 0 100-2H3zm10 4a1 1 0 102 0v-1h1a1 1 0 100-2h-1v-1a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1z" clip-rule="evenodd" />
-                                    </svg>
-                                </div>
-                            </div>
-                            <div class="mt-2 flex items-center space-x-1 justify-between text-xs text-gray-500">
-                                <!-- Micro-chart -->
-                                <div class="flex items-end h-6 space-x-1">
-                                    <div class="w-1 bg-blue-600/30 rounded-t" style="height: 30%"></div>
-                                    <div class="w-1 bg-blue-600/40 rounded-t" style="height: 60%"></div>
-                                    <div class="w-1 bg-blue-600/50 rounded-t" style="height: 80%"></div>
-                                    <div class="w-1 bg-blue-600/60 rounded-t" style="height: 40%"></div>
-                                    <div class="w-1 bg-blue-600/70 rounded-t" style="height: 70%"></div>
-                                    <div class="w-1 bg-blue-600/80 rounded-t" style="height: 50%"></div>
-                                    <div class="w-1 bg-blue-600/90 rounded-t" style="height: 90%"></div>
-                                </div>
-                                <span>Last 7 games</span>
-                            </div>
-                        </div>
-
-                        <!-- Stat Card 3: Total Games -->
-                        <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-6 shadow-lg border border-gray-800 hover:border-blue-800/30 transition-all duration-300 hover:-translate-y-1">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-gray-400 text-sm mb-1">Games Analyzed</p>
-                                    <div class="flex items-end">
-                                        <h3 id="totalGames" class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-blue-400">1,247</h3>
-                                        <span class="ml-2 text-xs font-medium text-blue-400">This Season</span>
-                                    </div>
-                                </div>
-                                <div class="bg-blue-400/10 p-2 rounded-md">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M9 4.804A7.968 7.968 0 005.5 4c-1.255 0-2.443.29-3.5.804v10A7.969 7.969 0 015.5 14c1.669 0 3.218.51 4.5 1.385A7.962 7.962 0 0114.5 14c1.255 0 2.443.29 3.5.804v-10A7.968 7.968 0 0014.5 4c-1.255 0-2.443.29-3.5.804V12a1 1 0 11-2 0V4.804z" />
-                                    </svg>
-                                </div>
-                            </div>
-                            <div class="mt-2">
-                                <div class="grid grid-cols-4 gap-1">
-                                    <div class="text-center">
-                                        <div class="font-semibold text-green-500">842</div>
-                                        <div class="text-xs text-gray-500">Home</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="font-semibold text-red-500">405</div>
-                                        <div class="text-xs text-gray-500">Away</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="font-semibold text-yellow-500">684</div>
-                                        <div class="text-xs text-gray-500">Won</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="font-semibold text-gray-500">563</div>
-                                        <div class="text-xs text-gray-500">Lost</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Stat Card 4: Prediction Accuracy -->
-                        <div class="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-6 shadow-lg border border-gray-800 hover:border-blue-800/30 transition-all duration-300 hover:-translate-y-1">
-                            <div class="flex justify-between items-start">
-                                <div>
-                                    <p class="text-gray-400 text-sm mb-1">Prediction Accuracy</p>
-                                    <div class="flex items-end">
-                                        <h3 id="predictionAccuracy1" class="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-blue-400">93.7%</h3>
-                                        <span class="ml-2 text-sm font-medium text-green-500 flex items-center">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-0.5" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clip-rule="evenodd" />
-                                            </svg>
-                                            1.2%
-                                        </span>
-                                    </div>
-                                </div>
-                                <div class="bg-blue-400/10 p-2 rounded-md">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-400" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M6.672 1.911a1 1 0 10-1.932.518l.259.966a1 1 0 001.932-.518l-.26-.966zM2.429 4.74a1 1 0 10-.517 1.932l.966.259a1 1 0 00.517-1.932l-.966-.26zm8.814-.569a1 1 0 00-1.415-1.414l-.707.707a1 1 0 101.415 1.415l.707-.708zm-7.071 7.072l.707-.707A1 1 0 003.465 9.12l-.708.707a1 1 0 001.415 1.415zm3.2-5.171a1 1 0 00-1.3 1.3l4 10a1 1 0 001.823.075l1.38-2.759 3.018 3.02a1 1 0 001.414-1.415l-3.019-3.02 2.76-1.379a1 1 0 00-.076-1.822l-10-4z" clip-rule="evenodd" />
-                                    </svg>
-                                </div>
-                            </div>
-                            <div class="mt-4 grid grid-cols-2 gap-2">
-                                <button class="text-xs px-3 py-1.5 bg-gradient-to-r from-blue-600 to-blue-500 rounded text-white font-semibold hover:from-blue-500 hover:to-blue-400 transition-colors">
-                                    Generate New
-                                </button>
-                                <button class="text-xs px-3 py-1.5 bg-gray-700 rounded text-gray-300 font-semibold hover:bg-gray-600 transition-colors">
-                                    View History
-                                </button>
-                            </div>
+                        <div class="stat-card">
+                            <h3>Prediction Accuracy</h3>
+                            <div id="predictionAccuracyMetric" class="stat-value">-</div>
                         </div>
                     </div>
-
-                    <!-- Premium Feature Callout - For subscribers -->
-                    <div class="mt-6 p-5 rounded-lg bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/30 relative overflow-hidden">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <div class="mb-2 flex items-center">
-                                    <div class="text-lg font-bold text-white">Premium Predictive System</div>
-                                    <div class="ml-3 text-xs font-semibold px-1.5 py-0.5 bg-gradient-to-r from-blue-600 to-blue-400 rounded-sm">EXCLUSIVE</div>
-                                </div>
-                                <p class="text-blue-100/90 font-light max-w-2xl">
-                                    Our AI-powered multi-factor prediction system is now analyzing your selected data. 
-                                    <span class="text-white font-medium">Prediction confidence is currently at 93.7%</span> based on 1,247 games analyzed.
-                                </p>
-                                <div class="mt-4 flex space-x-3">
-                                    <a href="#predictions" class="text-sm px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 rounded-md text-white font-medium transition-colors">
-                                        View Predictions
-                                    </a>
-                                    <a href="#" class="text-sm px-4 py-2 bg-gray-800/50 hover:bg-gray-800 border border-blue-800/30 rounded-md text-blue-300 font-medium transition-colors">
-                                        Customize Models
-                                    </a>
-                                </div>
-                            </div>
-                            <div class="hidden lg:flex items-center space-x-6 ml-8">
-                                <div class="text-center">
-                                    <div class="relative inline-flex">
-                                        <div class="flex items-center justify-center w-16 h-16 border-4 border-blue-500/30 rounded-full">
-                                            <div class="text-xl font-bold text-blue-400">94%</                                        </div>
-                                        </div>
-                                        <div class="absolute top-0 left-0 w-16 h-16">
-                                            <svg viewBox="0 0 36 36" class="w-full h-full">
-                                                <path class="stroke-blue-500 stroke-[4px] fill-none" d="M18 2.0845
-                                                    a 15.9155 15.9155 0 0 1 0 31.831
-                                                    a 15.9155 15.9155 0 0 1 0 -31.831"
-                                                    stroke-dasharray="94, 100"
-                                                    stroke-linecap="round"
-                                                />
-                                            </svg>
-                                        </div>
-                                    </div>
-                                    <div class="text-xs mt-1 text-blue-200">Accuracy</div>
-                                </div>
-                                <div class="text-center">
-                                    <div class="relative inline-flex">
-                                        <div class="flex items-center justify-center w-16 h-16 border-4 border-green-500/30 rounded-full">
-                                            <div class="text-xl font-bold text-green-400">96%</                                        </div>
-                                        </div>
-                                        <div class="absolute top-0 left-0 w-16 h-16">
-                                            <svg viewBox="0 0 36 36" class="w-full h-full">
-                                                <path class="stroke-green-500 stroke-[4px] fill-none" d="M18 2.0845
-                                                    a 15.9155 15.9155 0 0 1 0 31.831
-                                                    a 15.9155 15.9155 0 0 1 0 -31.831"
-                                                    stroke-dasharray="96, 100"
-                                                    stroke-linecap="round"
-                                                />
-                                            </svg>
-                                        </div>
-                                    </div>
-                                    <div class="text-xs mt-1 text-green-200">Reliability</div>
-                                </div>
-                            </div>
+                    
+                    <!-- Performance Chart -->
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold mb-4">Performance Analysis</h3>
+                        <div class="h-72">
+                            <canvas id="performance-chart"></canvas>
                         </div>
-                        <!-- Decorative elements -->
-                        <div class="absolute right-0 top-0 w-64 h-full opacity-10">
-                            <svg width="100%" height="100%" viewBox="0 0 100 100" preserveAspectRatio="none">
-                                <path fill="url(#gradient)" d="M0,0 L100,0 L100,100 L0,100 Z" />
-                                <defs>
-                                    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                                        <stop offset="0%" stop-color="#3B82F6" stop-opacity="0.2" />
-                                        <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0.6" />
-                                    </linearGradient>
-                                </defs>
-                            </svg>
+                    </div>
+                    
+                    <!-- Recent Activity -->
+                    <div class="premium-card">
+                        <h3 class="text-lg font-semibold mb-2 p-4">Recent Activity</h3>
+                        <div class="p-4">
+                            <ul class="space-y-3">
+                                <li class="flex items-center p-2 bg-gray-700 rounded">
+                                    <div class="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center mr-3">
+                                        <i class="fas fa-chart-line text-white"></i>
+                                    </div>
+                                    <div>
+                                        <p class="font-medium">Performance analysis updated</p>
+                                        <p class="text-sm text-gray-400">30 minutes ago</p>
+                                    </div>
+                                </li>
+                                <li class="flex items-center p-2 bg-gray-700 rounded">
+                                    <div class="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center mr-3">
+                                        <i class="fas fa-check text-white"></i>
+                                    </div>
+                                    <div>
+                                        <p class="font-medium">Prediction confirmed accurate</p>
+                                        <p class="text-sm text-gray-400">2 hours ago</p>
+                                    </div>
+                                </li>
+                                <li class="flex items-center p-2 bg-gray-700 rounded">
+                                    <div class="w-10 h-10 bg-purple-500 rounded-full flex items-center justify-center mr-3">
+                                        <i class="fas fa-trophy text-white"></i>
+                                    </div>
+                                    <div>
+                                        <p class="font-medium">New game results available</p>
+                                        <p class="text-sm text-gray-400">5 hours ago</p>
+                                    </div>
+                                </li>
+                            </ul>
                         </div>
                     </div>
                 </div>
-
-                <!-- Main Dashboard Sections -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-                    <!-- Predictions Section -->
-                    <div class="lg:col-span-2" id="predictions">
-                        <div class="bg-gray-800 rounded-lg shadow-lg border border-gray-700 h-full">
-                            <div class="p-6">
-                                <div class="flex justify-between items-center mb-4">
-                                    <h2 class="text-xl font-bold text-white">Predictive Analytics</h2>
-                                    <div class="flex">
-                                        <select id="predictTypeSelect" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2">
-                                            <option value="single_factor">Single-Factor</option>
-                                            <option value="multi_factor" selected>Multi-Factor</option>
-                                            <option value="advanced">Advanced Analytics</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <!-- New Multi-Factor Interface -->
-                                <div id="multi-factor-interface">
-                                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                                        <!-- Factor Control Panel -->
-                                        <div class="p-4 bg-gray-900 rounded-lg border border-gray-700">
-                                            <h3 class="text-lg font-semibold text-white mb-3">Prediction Factors</h3>
-                                            
-                                            <!-- Factors List -->
-                                            <div id="factorsList" class="space-y-3 max-h-96 overflow-y-auto pr-2">
-                                                <!-- Factor 1 -->
-                                                <div class="factor-input p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-600/50 transition-colors">
-                                                    <div class="flex justify-between items-center mb-2">
-                                                        <div class="font-medium text-white">Historical Performance</div>
-                                                        <div class="text-xs font-semibold px-1.5 py-0.5 bg-blue-600/20 text-blue-400 rounded-sm">Primary</div>
-                                                    </div>
-                                                    <div class="mb-2">
-                                                        <div class="text-xs text-gray-400 mb-1">Confidence Weight</div>
-                                                        <div class="flex items-center space-x-2">
-                                                            <input type="range" class="factor-weight w-full accent-blue-500 bg-gray-700 h-2 rounded-lg appearance-none" min="0.1" max="2" step="0.1" value="1.5">
-                                                            <span class="text-sm font-medium text-blue-400">1.5x</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="text-xs text-gray-400">
-                                                        Using last 25 games, head-to-head matchups, and home/away stats
-                                                    </div>
-                                                </div>
-                                                
-                                                <!-- Factor 2 -->
-                                                <div class="factor-input p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-600/50 transition-colors">
-                                                    <div class="flex justify-between items-center mb-2">
-                                                        <div class="font-medium text-white">Team Composition</div>
-                                                        <div class="text-xs font-semibold px-1.5 py-0.5 bg-blue-600/20 text-blue-400 rounded-sm">Active</div>
-                                                    </div>
-                                                    <div class="mb-2">
-                                                        <div class="text-xs text-gray-400 mb-1">Confidence Weight</div>
-                                                        <div class="flex items-center space-x-2">
-                                                            <input type="range" class="factor-weight w-full accent-blue-500 bg-gray-700 h-2 rounded-lg appearance-none" min="0.1" max="2" step="0.1" value="1.2">
-                                                            <span class="text-sm font-medium text-blue-400">1.2x</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="text-xs text-gray-400">
-                                                        Current roster, injuries, and player performance metrics
-                                                    </div>
-                                                </div>
-                                                
-                                                <!-- Factor 3 -->
-                                                <div class="factor-input p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-600/50 transition-colors">
-                                                    <div class="flex justify-between items-center mb-2">
-                                                        <div class="font-medium text-white">Advanced Analytics</div>
-                                                        <div class="text-xs font-semibold px-1.5 py-0.5 bg-blue-600/20 text-blue-400 rounded-sm">Active</div>
-                                                    </div>
-                                                    <div class="mb-2">
-                                                        <div class="text-xs text-gray-400 mb-1">Confidence Weight</div>
-                                                        <div class="flex items-center space-x-2">
-                                                            <input type="range" class="factor-weight w-full accent-blue-500 bg-gray-700 h-2 rounded-lg appearance-none" min="0.1" max="2" step="0.1" value="1.0">
-                                                            <span class="text-sm font-medium text-blue-400">1.0x</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="text-xs text-gray-400">
-                                                        Efficiency ratings, shooting analytics, and pace metrics
-                                                    </div>
-                                                </div>
-                                                
-                                                <!-- Factor 4 -->
-                                                <div class="factor-input p-3 bg-gray-800 rounded-lg border border-gray-700 hover:border-blue-600/50 transition-colors opacity-60">
-                                                    <div class="flex justify-between items-center mb-2">
-                                                        <div class="font-medium text-white">External Factors</div>
-                                                        <div class="text-xs font-semibold px-1.5 py-0.5 bg-gray-600/20 text-gray-400 rounded-sm">Inactive</div>
-                                                    </div>
-                                                    <div class="mb-2">
-                                                        <div class="text-xs text-gray-400 mb-1">Confidence Weight</div>
-                                                        <div class="flex items-center space-x-2">
-                                                            <input type="range" class="factor-weight w-full accent-gray-500 bg-gray-700 h-2 rounded-lg appearance-none disabled" min="0.1" max="2" step="0.1" value="0.8" disabled>
-                                                            <span class="text-sm font-medium text-gray-400">0.8x</span>
-                                                        </div>
-                                                    </div>
-                                                    <div class="text-xs text-gray-400">
-                                                        Travel distance, rest days, and venue factors
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <!-- Add Factor Button -->
-                                            <button id="addFactorBtn" class="mt-4 w-full py-2 px-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-md text-sm font-medium transition-colors flex items-center justify-center">
-                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                                    <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-                                                </svg>
-                                                Add Custom Factor
-                                            </button>
+                
+                <!-- Teams Tab Content -->
+                <div id="dashboardTeams" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Team Rankings</h3>
+                        <div class="p-4">
+                            <table class="w-full">
+                                <thead>
+                                    <tr class="text-left text-sm text-gray-400 border-b border-gray-700">
+                                        <th class="pb-2">Rank</th>
+                                        <th class="pb-2">Team</th>
+                                        <th class="pb-2">Win %</th>
+                                        <th class="pb-2">Last 10</th>
+                                        <th class="pb-2">Rating</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="border-b border-gray-700">
+                                        <td class="py-3">1</td>
+                                        <td class="py-3 flex items-center">
+                                            <div class="w-8 h-8 bg-blue-900 rounded flex items-center justify-center mr-2">LA</div>
+                                            <span>Lakers</span>
+                                        </td>
+                                        <td class="py-3">.720</td>
+                                        <td class="py-3">8-2</td>
+                                        <td class="py-3"><span class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">A+</span></td>
+                                    </tr>
+                                    <tr class="border-b border-gray-700">
+                                        <td class="py-3">2</td>
+                                        <td class="py-3 flex items-center">
+                                            <div class="w-8 h-8 bg-indigo-900 rounded flex items-center justify-center mr-2">GS</div>
+                                            <span>Warriors</span>
+                                        </td>
+                                        <td class="py-3">.705</td>
+                                        <td class="py-3">7-3</td>
+                                        <td class="py-3"><span class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">A</span></td>
+                                    </tr>
+                                    <tr class="border-b border-gray-700">
+                                        <td class="py-3">3</td>
+                                        <td class="py-3 flex items-center">
+                                            <div class="w-8 h-8 bg-green-900 rounded flex items-center justify-center mr-2">BO</div>
+                                            <span>Celtics</span>
+                                        </td>
+                                        <td class="py-3">.690</td>
+                                        <td class="py-3">8-2</td>
+                                        <td class="py-3"><span class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">A</span></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Players Tab Content -->
+                <div id="dashboardPlayers" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Top Performers</h3>
+                        <div class="p-4">
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex items-center mb-3">
+                                        <div class="w-12 h-12 bg-blue-900 rounded-full flex items-center justify-center mr-3">LJ</div>
+                                        <div>
+                                            <h4 class="font-semibold">LeBron James</h4>
+                                            <p class="text-sm text-gray-400">Lakers</p>
                                         </div>
-                                        
-                                        <!-- Prediction Results Panel -->
-                                        <div class="p-4 bg-gray-900 rounded-lg border border-gray-700">
-                                            <h3 class="text-lg font-semibold text-white mb-3">Prediction Results</h3>
-                                            
-                                            <!-- Result Visual -->
-                                            <div class="bg-gray-800 rounded-lg p-4 border border-gray-700 mb-4">
-                                                <div class="flex items-center justify-between mb-3">
-                                                    <div class="text-sm text-gray-400">Combined Confidence</div>
-                                                    <div class="text-sm font-semibold text-green-400">Very High</div>
-                                                </div>
-                                                <div class="flex items-center justify-center space-x-4 mb-4">
-                                                    <div class="text-center">
-                                                        <div class="text-2xl font-bold text-green-500">78%</                                                        </div>
-                                                        <div class="text-xs text-gray-400">Lakers Win</div>
-                                                    </div>
-                                                    <div class="text-gray-500 font-bold">VS</div>
-                                                    <div class="text-center">
-                                                        <div class="text-2xl font-bold text-red-500">22%</                                                        </div>
-                                                        <div class="text-xs text-gray-400">Warriors Win</div>
-                                                    </div>
-                                                </div>
-                                                <div class="w-full bg-gray-700 h-2 rounded-full overflow-hidden">
-                                                    <div class="bg-gradient-to-r from-green-500 to-green-400 h-full rounded-full" style="width: 78%"></div>
-                                                </div>
-                                            </div>
-                                            
-                                            <!-- Contributing Factors -->
-                                            <div>
-                                                <div class="text-sm font-medium text-white mb-2">Contributing Factors</div>
-                                                <div class="space-y-2">
-                                                    <div class="flex justify-between items-center text-sm">
-                                                        <div class="flex items-center">
-                                                            <div class="w-1 h-4 bg-green-500 rounded-full mr-2"></div>
-                                                            <span class="text-gray-300">Historical Performance</span>
-                                                        </div>
-                                                        <span class="text-green-400">+8.4%</span>
-                                                    </div>
-                                                    <div class="flex justify-between items-center text-sm">
-                                                        <div class="flex items-center">
-                                                            <div class="w-1 h-4 bg-green-500 rounded-full mr-2"></div>
-                                                            <span class="text-gray-300">Team Composition</span>
-                                                        </div>
-                                                        <span class="text-green-400">+12.1%</span>
-                                                    </div>
-                                                    <div class="flex justify-between items-center text-sm">
-                                                        <div class="flex items-center">
-                                                            <div class="w-1 h-4 bg-red-500 rounded-full mr-2"></div>
-                                                            <span class="text-gray-300">Advanced Analytics</span>
-                                                        </div>
-                                                        <span class="text-red-400">-4.2%</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            
-                                            <!-- Action Buttons -->
-                                            <div class="mt-5 grid grid-cols-2 gap-3">
-                                                <button id="runPredictionBtn" class="py-2 px-3 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-md text-sm font-medium transition-colors">
-                                                    Run Analysis
-                                                </button>
-                                                <button id="savePredictionBtn" class="py-2 px-3 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded-md text-sm font-medium transition-colors">
-                                                    Save Result
-                                                </button>
-                                            </div>
+                                    </div>
+                                    <div class="grid grid-cols-3 gap-2 text-center">
+                                        <div>
+                                            <p class="text-xl font-bold">27.4</p>
+                                            <p class="text-xs text-gray-400">PPG</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xl font-bold">8.2</p>
+                                            <p class="text-xs text-gray-400">RPG</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xl font-bold">9.7</p>
+                                            <p class="text-xs text-gray-400">APG</p>
                                         </div>
                                     </div>
                                 </div>
-                                
-                                <!-- Historical Accuracy -->
-                                <div class="mt-4 bg-gray-900 rounded-lg border border-gray-700 p-4">
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex items-center mb-3">
+                                        <div class="w-12 h-12 bg-indigo-900 rounded-full flex items-center justify-center mr-3">SC</div>
+                                        <div>
+                                            <h4 class="font-semibold">Stephen Curry</h4>
+                                            <p class="text-sm text-gray-400">Warriors</p>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-3 gap-2 text-center">
+                                        <div>
+                                            <p class="text-xl font-bold">29.6</p>
+                                            <p class="text-xs text-gray-400">PPG</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xl font-bold">5.4</p>
+                                            <p class="text-xs text-gray-400">RPG</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xl font-bold">6.2</p>
+                                            <p class="text-xs text-gray-400">APG</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex items-center mb-3">
+                                        <div class="w-12 h-12 bg-green-900 rounded-full flex items-center justify-center mr-3">JT</div>
+                                        <div>
+                                            <h4 class="font-semibold">Jayson Tatum</h4>
+                                            <p class="text-sm text-gray-400">Celtics</p>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-3 gap-2 text-center">
+                                        <div>
+                                            <p class="text-xl font-bold">26.9</p>
+                                            <p class="text-xs text-gray-400">PPG</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xl font-bold">8.8</p>
+                                            <p class="text-xs text-gray-400">RPG</p>
+                                        </div>
+                                        <div>
+                                            <p class="text-xl font-bold">4.3</p>
+                                            <p class="text-xs text-gray-400">APG</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Predictions Tab Content -->
+                <div id="dashboardPredictions" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Upcoming Game Predictions</h3>
+                        <div class="p-4">
+                            <div class="space-y-4">
+                                <div class="bg-gray-700 p-4 rounded">
                                     <div class="flex justify-between items-center mb-3">
-                                        <h3 class="text-sm font-medium text-white">Recent Prediction Accuracy</h3>
-                                        <a href="#" class="text-xs text-blue-400 hover:text-blue-300">View Full History</a>
-                                    </div>
-                                    
-                                    <div class="space-y-2">
                                         <div class="flex items-center">
-                                            <div class="w-32 text-sm text-gray-400">Lakers vs Nets</div>
-                                            <div class="flex-1">
-                                                <div class="flex items-center">
-                                                    <div class="w-20 text-right pr-2 text-sm">Predicted:</div>
-                                                    <div class="text-sm font-medium text-white">Lakers +7.5</div>
-                                                </div>
-                                                <div class="flex items-center">
-                                                    <div class="w-20 text-right pr-2 text-sm">Actual:</div>
-                                                    <div class="text-sm font-medium text-green-400">Lakers +9</div>
-                                                </div>
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-semibold rounded">CORRECT</div>
-                                            </div>
+                                            <div class="w-10 h-10 bg-purple-900 rounded flex items-center justify-center mr-2">LA</div>
+                                            <span>Lakers</span>
                                         </div>
-                                        
+                                        <span class="text-sm text-gray-400">vs</span>
                                         <div class="flex items-center">
-                                            <div class="w-32 text-sm text-gray-400">Celtics vs Bulls</div>
-                                            <div class="flex-1">
-                                                <div class="flex items-center">
-                                                    <div class="w-20 text-right pr-2 text-sm">Predicted:</div>
-                                                    <div class="text-sm font-medium text-white">Celtics +4.5</div>
-                                                </div>
-                                                <div class="flex items-center">
-                                                    <div class="w-20 text-right pr-2 text-sm">Actual:</div>
-                                                    <div class="text-sm font-medium text-green-400">Celtics +6</div>
-                                                </div>
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="px-2 py-1 bg-green-500/20 text-green-400 text-xs font-semibold rounded">CORRECT</div>
-                                            </div>
+                                            <span>Clippers</span>
+                                            <div class="w-10 h-10 bg-red-900 rounded flex items-center justify-center ml-2">CL</div>
                                         </div>
-                                        
+                                    </div>
+                                    <div class="bg-gray-800 h-2 rounded-full mb-1">
+                                        <div class="bg-blue-500 h-full rounded-full" style="width: 65%"></div>
+                                    </div>
+                                    <div class="flex justify-between text-xs text-gray-400">
+                                        <span>Lakers win: 65%</span>
+                                        <span>Clippers win: 35%</span>
+                                    </div>
+                                </div>
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex justify-between items-center mb-3">
                                         <div class="flex items-center">
-                                            <div class="w-32 text-sm text-gray-400">Heat vs Knicks</div>
-                                            <div class="flex-1">
-                                                <div class="flex items-center">
-                                                    <div class="w-20 text-right pr-2 text-sm">Predicted:</div>
-                                                    <div class="text-sm font-medium text-white">Heat +2.5</div>
-                                                </div>
-                                                <div class="flex items-center">
-                                                    <div class="w-20 text-right pr-2 text-sm">Actual:</div>
-                                                    <div class="text-sm font-medium text-red-400">Knicks +1</div>
-                                                </div>
-                                            </div>
-                                            <div class="ml-4">
-                                                <div class="px-2 py-1 bg-red-500/20 text-red-400 text-xs font-semibold rounded">MISSED</div>
-                                            </div>
+                                            <div class="w-10 h-10 bg-green-900 rounded flex items-center justify-center mr-2">CE</div>
+                                            <span>Celtics</span>
+                                        </div>
+                                        <span class="text-sm text-gray-400">vs</span>
+                                        <div class="flex items-center">
+                                            <span>Nets</span>
+                                            <div class="w-10 h-10 bg-gray-900 rounded flex items-center justify-center ml-2">BN</div>
                                         </div>
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Recent Games Section -->
-                    <div class="bg-gray-800 rounded-lg shadow-lg border border-gray-700" id="recent-games">
-                        <div class="p-6">
-                            <div class="flex justify-between items-center mb-4">
-                                <h2 class="text-xl font-bold text-white">Recent Games</h2>
-                                <select id="gamesFilter" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2">
-                                    <option value="5">Last 5 games</option>
-                                    <option value="10" selected>Last 10 games</option>
-                                    <option value="20">Last 20 games</option>
-                                </select>
-                            </div>
-                            <div id="recentGames" class="space-y-3 overflow-y-auto max-h-[680px] pr-1">
-                                <!-- Game 1 -->
-                                <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 hover:border-blue-600/50 transition-colors">
-                                    <div class="flex justify-between items-center">
-                                        <div class="flex items-center space-x-3">
-                                            <div class="relative">
-                                                <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-purple-700 to-purple-900 rounded-full">
-                                                    <span class="text-sm font-bold">LAL</span>
-                                                </div>
-                                                <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-xs font-bold">W</div>
-                                            </div>
-                                            <div>
-                                                <div class="font-medium text-white">Los Angeles Lakers</div>
-                                                <div class="text-sm text-gray-400">Home</div>
-                                            </div>
-                                        </div>
-                                        <div class="text-3xl font-bold text-white">118</div>
+                                    <div class="bg-gray-800 h-2 rounded-full mb-1">
+                                        <div class="bg-blue-500 h-full rounded-full" style="width: 52%"></div>
                                     </div>
-                                    <div class="my-2 flex items-center justify-center">
-                                        <div class="text-xs font-medium px-2 py-1 bg-gray-800 rounded">Jan 15, 2025</div>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <div class="flex items-center space-x-3">
-                                            <div class="relative">
-                                                <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-blue-700 to-blue-900 rounded-full">
-                                                    <span class="text-sm font-bold">GSW</span>
-                                                </div>
-                                                <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold">L</div>
-                                            </div>
-                                            <div>
-                                                <div class="font-medium text-white">Golden State Warriors</div>
-                                                <div class="text-sm text-gray-400">Away</div>
-                                            </div>
-                                        </div>
-                                        <div class="text-3xl font-bold text-white">112</div>
-                                    </div>
-                                    <div class="mt-3 pt-3 border-t border-gray-700 grid grid-cols-3 gap-2 text-center text-xs">
-                                        <div>
-                                            <div class="text-gray-400">Accuracy</div>
-                                            <div class="font-medium text-green-400">92%</                                            </div>
-                                        </div>
-                                        <div>
-                                            <div class="text-gray-400">Prediction</div>
-                                            <div class="font-medium text-white">LAL +5.5</div>
-                                        </div>
-                                        <div>
-                                            <div class="text-gray-400">Result</div>
-                                            <div class="font-medium text-green-400">LAL +6</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Game 2 -->
-                                <div class="bg-gray-900 rounded-lg p-4 border border-gray-700 hover:border-blue-600/50 transition-colors">
-                                    <div class="flex justify-between items-center">
-                                        <div class="flex items-center space-x-3">
-                                            <div class="relative">
-                                                <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-green-700 to-green-900 rounded-full">
-                                                    <span class="text-sm font-bold">BOS</span>
-                                                </div>
-                                                <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center text-xs font-bold">W</div>
-                                            </div>
-                                            <div>
-                                                <div class="font-medium text-white">Boston Celtics</div>
-                                                <div class="text-sm text-gray-400">Home</div>
-                                            </div>
-                                        </div>
-                                        <div class="text-3xl font-bold text-white">124</div>
-                                    </div>
-                                    <div class="my-2 flex items-center justify-center">
-                                        <div class="text-xs font-medium px-2 py-1 bg-gray-800 rounded">Jan 12, 2025</div>
-                                    </div>
-                                    <div class="flex justify-between items-center">
-                                        <div class="flex items-center space-x-3">
-                                            <div class="relative">
-                                                <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-red-700 to-red-900 rounded-full">
-                                                    <span class="text-sm font-bold">CHI</span>
-                                                </div>
-                                                <div class="absolute -bottom-1 -right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center text-xs font-bold">L</div>
-                                            </div>
-                                            <div>
-                                                <div class="font-medium text-white">Chicago Bulls</div>
-                                                <div class="text-sm text-gray-400">Away</div>
-                                            </div>
-                                        </div>
-                                        <div class="text-3xl font-bold text-white">108</div>
-                                    </div>
-                                    <div class="mt-3 pt-3 border-t border-gray-700 grid grid-cols-3 gap-2 text-center text-xs">
-                                        <div>
-                                            <div class="text-gray-400">Accuracy</div>
-                                            <div class="font-medium text-green-400">88%</                                            </div>
-                                        </div>
-                                        <div>
-                                            <div class="text-gray-400">Prediction</div>
-                                            <div class="font-medium text-white">BOS +12</div>
-                                        </div>
-                                        <div>
-                                            <div class="text-gray-400">Result</div>
-                                            <div class="font-medium text-green-400">BOS +16</div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- More games would be here - remove for brevity -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Performance Charts -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8" id="performance">
-                    <!-- Performance Trend Chart -->
-                    <div class="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
-                        <div class="p-6">
-                            <div class="flex justify-between items-center mb-4">
-                                <h2 class="text-xl font-bold text-white">Performance Trend</h2>
-                                <select id="chartType" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2">
-                                    <option value="score">Score Analysis</option>
-                                    <option value="differential">Point Differential</option>
-                                </select>
-                            </div>
-                            <div class="relative h-80">
-                                <canvas id="performanceChart" class="w-full h-full"></canvas>
-                                
-                                <!-- Chart overlay label -->
-                                <div class="absolute bottom-0 right-0 m-4 px-2 py-1 bg-gray-900/90 rounded text-xs font-medium flex items-center">
-                                    <div class="h-3 w-3 bg-blue-500 rounded-full mr-1"></div>
-                                    <span>Home Team</span>
-                                    <div class="h-3 w-3 bg-red-500 rounded-full ml-3 mr-1"></div>
-                                    <span>Away Team</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Advanced Metrics Chart -->
-                    <div class="bg-gray-800 rounded-lg shadow-lg border border-gray-700">
-                        <div class="p-6">
-                            <div class="flex justify-between items-center mb-4">
-                                <h2 class="text-xl font-bold text-white">Advanced Metrics</h2>
-                                <select id="metricsType" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2">
-                                    <option value="efficiency">Efficiency Ratings</option>
-                                    <option value="shooting">Shooting Analysis</option>
-                                </select>
-                            </div>
-                            <!-- Radar chart for advanced metrics -->
-                            <div class="relative h-80">
-                                <canvas id="advancedMetricsChart" class="w-full h-full"></canvas>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Player Analysis -->
-                <div class="mb-8">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-xl font-bold text-white">Player Analysis</h2>
-                        <div class="flex items-center">
-                            <div class="mr-4">
-                                <select id="playerSelect" class="bg-gray-700 border border-gray-600 text-white text-sm rounded-md focus:ring-blue-500 focus:border-blue-500 p-2">
-                                    <option value="">Select Player</option>
-                                    <option value="1">LeBron James</option>
-                                    <option value="2">Stephen Curry</option>
-                                    <option value="3">Kevin Durant</option>
-                                </select>
-                            </div>
-                            <button class="flex items-center text-sm px-3 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-1" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-                                </svg>
-                                Compare Players
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Player stats grid -->
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        <!-- Player Card -->
-                        <div class="bg-gray-800 rounded-lg shadow-lg border border-gray-700 overflow-hidden">
-                            <!-- Player Header -->
-                            <div class="bg-gradient-to-r from-blue-900/80 to-purple-900/80 p-6">
-                                <div class="flex items-center">
-                                    <div class="w-16 h-16 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 flex items-center justify-center text-2xl font-bold mr-4">
-                                        LJ
-                                    </div>
-                                    <div>
-                                        <h3 class="text-2xl font-bold text-white">LeBron James</h3>
-                                        <div class="text-blue-200">Los Angeles Lakers | #6</div>
-                                    </div>
-                                </div>
-                                <div class="mt-4 grid grid-cols-3 gap-2 text-center">
-                                    <div>
-                                        <div class="text-sm text-blue-200">PPG</div>
-                                        <div class="text-xl font-bold text-white">27.4</div>
-                                    </div>
-                                    <div>
-                                        <div class="text-sm text-blue-200">RPG</div>
-                                        <div class="text-xl font-bold text-white">8.2</div>
-                                    </div>
-                                    <div>
-                                        <div class="text-sm text-blue-200">APG</div>
-                                        <div class="text-xl font-bold text-white">7.9</div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Performance Prediction -->
-                            <div class="p-4 border-t border-gray-700">
-                                <div class="text-sm font-semibold text-gray-300 mb-2">NEXT GAME PREDICTION</div>
-                                <div class="flex justify-between items-center mb-1">
-                                    <div class="text-xs text-gray-400">vs. Warriors | Jan 18</div>
-                                    <div class="text-xs font-medium text-green-400">93% Confidence</div>
-                                </div>
-                                <div class="grid grid-cols-3 gap-2 text-center text-sm mt-3">
-                                    <div>
-                                        <div class="text-xs text-gray-400">Points</div>
-                                        <div class="font-bold text-white">28-32</div>
-                                    </div>
-                                    <div>
-                                        <div class="text-xs text-gray-400">Rebounds</div>
-                                        <div class="font-bold text-white">7-9</div>
-                                    </div>
-                                    <div>
-                                        <div class="text-xs text-gray-400">Assists</div>
-                                        <div class="font-bold text-white">8-10</div>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <!-- Historical Performance -->
-                            <div class="p-4 border-t border-gray-700">
-                                <div class="text-sm font-semibold text-gray-300 mb-2">LAST 5 GAMES</div>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between items-center text-sm">
-                                        <div class="text-gray-400">vs Nets</div>
-                                        <div class="text-white">32 PTS, 7 REB, 9 AST</div>
-                                    </div>
-                                    <div class="flex justify-between items-center text-sm">
-                                        <div class="text-gray-400">vs Bucks</div>
-                                        <div class="text-white">29 PTS, 8 REB, 6 AST</div>
-                                    </div>
-                                    <div class="flex justify-between items-center text-sm">
-                                        <div class="text-gray-400">vs Celtics</div>
-                                        <div class="text-white">25 PTS, 10 REB, 8 AST</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Player Stats & Visual -->
-                        <div class="bg-gray-800 rounded-lg shadow-lg border border-gray-700 lg:col-span-2">
-                            <div class="p-6">
-                                <h3 class="text-lg font-bold text-white mb-4">Performance Analytics</h3>
-                                <div class="h-80">
-                                    <canvas id="playerStatsChart" class="w-full h-full"></canvas>
-                                </div>
-                                <!-- Insights section -->
-                                <div class="mt-4 pt-4 border-t border-gray-700">
-                                    <div class="text-sm font-semibold text-white mb-2">KEY INSIGHTS</div>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                        <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
-                                            <div class="flex items-center">
-                                                <div class="text-green-400 mr-2">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                        <path fill-rule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clip-rule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                                <div class="text-sm font-medium text-white">Shooting 42% from 3PT in last 7 games</div>
-                                            </div>
-                                        </div>
-                                        <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
-                                            <div class="flex items-center">
-                                                <div class="text-yellow-400 mr-2">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                                <div class="text-sm font-medium text-white">Minutes trending up over last 5 games</div>
-                                            </div>
-                                        </div>
-                                        <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
-                                            <div class="flex items-center">
-                                                <div class="text-green-400 mr-2">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                        <path fill-rule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clip-rule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                                <div class="text-sm font-medium text-white">93.7% efficiency rating vs Warriors</div>
-                                            </div>
-                                        </div>
-                                        <div class="bg-gray-900 p-3 rounded-lg border border-gray-700">
-                                            <div class="flex items-center">
-                                                <div class="text-red-400 mr-2">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                                        <path fill-rule="evenodd" d="M12 13a1 1 0 100 2h5a1 1 0 001-1V9a1 1 0 10-2 0v2.586l-4.293-4.293a1 1 0 00-1.414 0L8 9.586 3.707 5.293a1 1 0 00-1.414 1.414l5 5a1 1 0 001.414 0L11 9.414 14.586 13H12z" clip-rule="evenodd" />
-                                                    </svg>
-                                                </div>
-                                                <div class="text-sm font-medium text-white">Turnovers higher in back-to-back games</div>
-                                            </div>
-                                        </div>
+                                    <div class="flex justify-between text-xs text-gray-400">
+                                        <span>Celtics win: 52%</span>
+                                        <span>Nets win: 48%</span>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- Footer -->
-                <footer class="mt-12 pb-6">
-                    <div class="border-t border-gray-800 pt-6">
-                        <div class="flex flex-col md:flex-row justify-between items-center">
-                            <div class="text-gray-400 text-sm mb-4 md:mb-0">
-                                &copy; 2025 Sports Analytics Pro. All rights reserved.
-                            </div>
-                            <div class="flex items-center space-x-4">
-                                <a href="#" class="text-gray-400 hover:text-white transition-colors">
-                                    Documentation
-                                </a>
-                                <a href="#" class="text-gray-400 hover:text-white transition-colors">
-                                    Support
-                                </a>
-                                <a href="#" class="text-gray-400 hover:text-white transition-colors">
-                                    API Access
-                                </a>
-                                <a href="#" class="text-gray-400 hover:text-white transition-colors">
-                                    Privacy Policy
-                                </a>
+                
+                <!-- Fixtures Tab Content -->
+                <div id="dashboardFixtures" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Upcoming Games</h3>
+                        <div class="p-4">
+                            <ul class="space-y-3">
+                                <li class="p-3 bg-gray-700 rounded flex justify-between items-center">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-purple-900 rounded flex items-center justify-center mr-2">LA</div>
+                                        <span>Lakers</span>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-sm text-gray-400">Dec 12, 2023</div>
+                                        <div class="font-bold">8:30 PM</div>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <span>Clippers</span>
+                                        <div class="w-10 h-10 bg-red-900 rounded flex items-center justify-center ml-2">CL</div>
+                                    </div>
+                                </li>
+                                <li class="p-3 bg-gray-700 rounded flex justify-between items-center">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-green-900 rounded flex items-center justify-center mr-2">CE</div>
+                                        <span>Celtics</span>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-sm text-gray-400">Dec 14, 2023</div>
+                                        <div class="font-bold">7:00 PM</div>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <span>Nets</span>
+                                        <div class="w-10 h-10 bg-gray-900 rounded flex items-center justify-center ml-2">BN</div>
+                                    </div>
+                                </li>
+                                <li class="p-3 bg-gray-700 rounded flex justify-between items-center">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-indigo-900 rounded flex items-center justify-center mr-2">GS</div>
+                                        <span>Warriors</span>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-sm text-gray-400">Dec 16, 2023</div>
+                                        <div class="font-bold">10:00 PM</div>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <span>Suns</span>
+                                        <div class="w-10 h-10 bg-orange-900 rounded flex items-center justify-center ml-2">PH</div>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Live Games Tab Content -->
+                <div id="dashboardLive" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Live Games</h3>
+                        <div class="p-4">
+                            <div class="grid place-items-center h-40">
+                                <div class="text-center">
+                                    <p class="text-gray-400 mb-2">No live games at the moment</p>
+                                    <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium">Check Scheduled Games</button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </footer>
+                </div>
+                
+                <!-- Charts Tab Content -->
+                <div id="dashboardCharts" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Trend Analysis</h3>
+                        <div class="h-72 p-4">
+                            <div class="flex justify-center items-center h-full">
+                                <p class="text-gray-400">Select a league and team to view detailed trends</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Insights Tab Content -->
+                <div id="dashboardInsights" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Key Insights</h3>
+                        <div class="p-4">
+                            <div class="space-y-4">
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex items-center mb-2">
+                                        <div class="w-8 h-8 bg-blue-900 rounded-full flex items-center justify-center mr-3">
+                                            <i class="fas fa-chart-line text-white text-sm"></i>
+                                        </div>
+                                        <h4 class="font-semibold">Performance Trend</h4>
+                                    </div>
+                                    <p class="text-sm text-gray-300">Teams with 3+ consecutive wins show a 72% chance of winning their next game when playing at home.</p>
+                                </div>
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex items-center mb-2">
+                                        <div class="w-8 h-8 bg-green-900 rounded-full flex items-center justify-center mr-3">
+                                            <i class="fas fa-user-check text-white text-sm"></i>
+                                        </div>
+                                        <h4 class="font-semibold">Player Impact</h4>
+                                    </div>
+                                    <p class="text-sm text-gray-300">Star players returning from injury show reduced efficiency (15% lower) for their first 2 games back.</p>
+                                </div>
+                                <div class="bg-gray-700 p-4 rounded">
+                                    <div class="flex items-center mb-2">
+                                        <div class="w-8 h-8 bg-purple-900 rounded-full flex items-center justify-center mr-3">
+                                            <i class="fas fa-calendar-check text-white text-sm"></i>
+                                        </div>
+                                        <h4 class="font-semibold">Schedule Factor</h4>
+                                    </div>
+                                    <p class="text-sm text-gray-300">Teams playing their 3rd game in 4 nights have a 65% chance of underperforming against their season average.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Reports Tab Content -->
+                <div id="dashboardReports" class="dashboard-tab">
+                    <div class="premium-card mb-6">
+                        <h3 class="text-lg font-semibold p-4">Available Reports</h3>
+                        <div class="p-4">
+                            <ul class="space-y-3">
+                                <li class="bg-gray-700 p-3 rounded flex justify-between items-center">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-blue-900 rounded flex items-center justify-center mr-3">
+                                            <i class="fas fa-chart-pie text-white"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium">Season Performance Report</h4>
+                                            <p class="text-xs text-gray-400">Complete analysis of all games this season</p>
+                                        </div>
+                                    </div>
+                                    <button class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-sm rounded">Download</button>
+                                </li>
+                                <li class="bg-gray-700 p-3 rounded flex justify-between items-center">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-purple-900 rounded flex items-center justify-center mr-3">
+                                            <i class="fas fa-users text-white"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium">Team Comparison Report</h4>
+                                            <p class="text-xs text-gray-400">Head-to-head statistics and analysis</p>
+                                        </div>
+                                    </div>
+                                    <button class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-sm rounded">Download</button>
+                                </li>
+                                <li class="bg-gray-700 p-3 rounded flex justify-between items-center">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-green-900 rounded flex items-center justify-center mr-3">
+                                            <i class="fas fa-user-chart text-white"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-medium">Player Performance Report</h4>
+                                            <p class="text-xs text-gray-400">Detailed stats for individual players</p>
+                                        </div>
+                                    </div>
+                                    <button class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-sm rounded">Download</button>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
-
-    <!-- Toast Notification Container -->
-    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
-
+    
     <!-- Scripts -->
-    <script type="module" src="/dashboard/scripts/dashboard.js"></script>
-    <script type="module" src="/dashboard/scripts/charts.js"></script>
-    <script type="module" src="/dashboard/scripts/predictions.js"></script>
-    <script src="/js/auth.js"></script>
-    <script>
-        // Show loading overlay until authentication is verified
-        document.addEventListener('DOMContentLoaded', async () => {
-            const overlay = document.getElementById('globalLoadingOverlay');
-            try {
-                const token = localStorage.getItem('token');
-                if (!token) {
-                    window.location.href = '/login';
-                    return;
-                }
-                const response = await fetch('/api/auth/verify', {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
-                });
-                if (!response.ok) {
-                    throw new Error('Invalid token');
-                }
-                overlay.classList.add('hidden');
-            } catch (error) {
-                console.error('Authentication error:', error);
-                localStorage.clear();
-                window.location.href = '/login';
-            }
-        });
-    </script>
+    <script src="dashboard-recovery.js"></script>
+    <script src="dashboard-init-fix.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/sportsDataService.js"></script>
+    <script src="dashboard-scripts.js"></script>
+    
+    <!-- JavaScript Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script src="js/dashboard.js"></script>
 </body>
 </html>

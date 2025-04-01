@@ -1,6 +1,21 @@
 // WebSocket Client for Real-time Sports Analytics Updates
 // Version 3.1.0
 
+document.addEventListener('DOMContentLoaded', () => {
+    if (!isPublicPage()) {
+        const wsClient = new WebSocketClient();
+        wsClient.connect().catch(error => {
+            console.error('WebSocket connection failed:', error);
+        });
+    }
+});
+
+function isPublicPage() {
+    const publicPaths = ['/login', '/signup', '/forgot-password', '/', '/index.html'];
+    const currentPath = window.location.pathname;
+    return publicPaths.includes(currentPath);
+}
+
 /**
  * WebSocket Client for real-time sports analytics updates
  * Handles connection management, subscription, and message routing

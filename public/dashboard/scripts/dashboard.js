@@ -1,11 +1,11 @@
 // Professional Sports Analytics Dashboard - Main Controller
 // Version 3.1.0
 
-import { LoadingState } from './loadingstate.js';
-import { Toast } from './toast.js';
-import { ErrorBoundary } from './ErrorBoundary.js';
-import { SecurityManager } from './security/SecurityManager.js';
-import DashboardManager from './components/dashboardmanager.js';
+// Standard imports
+import LoadingState from './loadingstate.js';
+import Toast from './toast.js';
+import ErrorBoundary from './ErrorBoundary.js';
+import SecurityManager from './security/SecurityManager.js';
 import PredictionManager from './predictions.js';
 import WebSocketClient from './websocket.js';
 import Cache from './cache.js';
@@ -89,7 +89,7 @@ class SportsAnalyticsDashboard {
 
         try {
             console.log('Verifying authentication token...');
-            const response = await fetch('/api/user/profile', {
+            const response = await fetch('/api/auth/verify', {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -102,13 +102,13 @@ class SportsAnalyticsDashboard {
             }
 
             const userData = await response.json();
-            this.state.user = userData;
+            this.state.user = userData.user || userData;
             
             // Update UI with user info
-            this.updateUserInterface(userData);
+            this.updateUserInterface(this.state.user);
             
             console.log('Authentication verified successfully');
-            return userData;
+            return this.state.user;
         } catch (error) {
             console.error('Authentication verification failed:', error);
             localStorage.removeItem('token');
@@ -395,16 +395,15 @@ class SportsAnalyticsDashboard {
         try {
             console.log(`Loading teams for ${league}...`);
             
-            // Try to get from cache first
-            const cacheKey = `teams:${league}`;
-            const cachedTeams = this.managers.cache.get(cacheKey);
-            
-            if (cachedTeams) {
-                console.log(`Using cached teams for ${league}`);
-                this.updateTeamSelect(cachedTeams);
-                return cachedTeams;
-            }
-            
+            // Show loading state in team selectors
+            const teamSelectors = document.querySelectorAll('.team-selector, #teamSelect');
+            teamSelectors.forEach(selector => {
+                if (selector instanceof HTMLSelectElement) {
+                    selector.disabled = true;
+                    selector.innerHTML = '<option value="">Loading teams...</option>';
+                }
+            });
+
             const response = await fetch(`/api/leagues/${league}/teams`, {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('token')}`,
@@ -416,20 +415,57 @@ class SportsAnalyticsDashboard {
                 throw new Error(`Failed to load teams: ${response.status}`);
             }
             
-            const teams = await response.json();
+            const result = await response.json();
+            const teams = result.data || [];
             
-            // Validate teams data structure
-            if (!Array.isArray(teams)) {
-                throw new Error('Invalid teams data: expected an array');
+            // Update all team selectors
+            teamSelectors.forEach(selector => {
+                if (selector instanceof HTMLSelectElement) {
+                    selector.innerHTML = '<option value="">All Teams</option>';
+                    teams.forEach(team => {
+                        const option = document.createElement('option');
+                        option.value = team.id || team.teamId;
+                        option.textContent = team.name || team.displayName;
+                        selector.appendChild(option);
+                    });
+                    selector.disabled = false;
+                }
+            });
+
+            // Store teams in state
+            this.state.teams = teams;
+            
+            // If there was a previously selected team for this league, try to restore it
+            const previousTeam = localStorage.getItem('selectedTeam');
+            if (previousTeam && teams.some(t => (t.id === previousTeam || t.teamId === previousTeam))) {
+                this.state.selectedTeam = previousTeam;
+                teamSelectors.forEach(selector => {
+                    if (selector instanceof HTMLSelectElement) {
+                        selector.value = previousTeam;
+                    }
+                });
+            } else {
+                // Reset team selection
+                this.state.selectedTeam = '';
+                localStorage.setItem('selectedTeam', '');
+                teamSelectors.forEach(selector => {
+                    if (selector instanceof HTMLSelectElement) {
+                        selector.value = '';
+                    }
+                });
             }
-            
-            // Cache the teams
-            this.managers.cache.set(cacheKey, teams);
-            
-            this.updateTeamSelect(teams);
+
             return teams;
         } catch (error) {
             console.error(`Error loading teams for ${league}:`, error);
+            // Show error in selectors
+            const teamSelectors = document.querySelectorAll('.team-selector, #teamSelect');
+            teamSelectors.forEach(selector => {
+                if (selector instanceof HTMLSelectElement) {
+                    selector.innerHTML = '<option value="">Error loading teams</option>';
+                    selector.disabled = true;
+                }
+            });
             throw error;
         }
     }
@@ -518,43 +554,6 @@ class SportsAnalyticsDashboard {
             // Don't rethrow - we can continue without games
             Toast.show('Unable to load games. Some data may be unavailable.', 'warning');
             return [];
-        }
-    }
-
-    updateTeamSelect(teams) {
-        const teamSelect = document.getElementById('teamSelect');
-        if (!teamSelect) return;
-        
-        // Clear existing options
-        while (teamSelect.firstChild) {
-            teamSelect.removeChild(teamSelect.firstChild);
-        }
-        
-        // Add "All Teams" option
-        const allOption = document.createElement('option');
-        allOption.value = '';
-        allOption.textContent = 'All Teams';
-        teamSelect.appendChild(allOption);
-        
-        // Add team options
-        if (Array.isArray(teams)) {
-            teams.forEach(team => {
-                const option = document.createElement('option');
-                option.value = team.id;
-                option.textContent = team.name;
-                teamSelect.appendChild(option);
-            });
-        }
-        
-        // Set current selected team
-        teamSelect.value = this.state.selectedTeam || '';
-            
-        // Update current team display
-        const currentTeamEl = document.getElementById('currentTeam');
-        if (currentTeamEl) {
-            currentTeamEl.textContent = this.state.selectedTeam ? 
-                teams.find(t => t.id === this.state.selectedTeam)?.name || 'Unknown' : 
-                'All Teams';
         }
     }
 
@@ -905,37 +904,151 @@ class SportsAnalyticsDashboard {
         this.loadInitialData();
     }
 
-    handleLeagueChange(e) {
-        const newLeague = e.target.value;
-        this.setCurrentLeague(newLeague);
+    handleLeagueChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        
+        const league = target.value;
+        console.log('League changed to:', league);
+        
+        if (league !== this.state.currentLeague) {
+            this.state.currentLeague = league;
+            localStorage.setItem('selectedLeague', league);
+            
+            // Reset team selection when changing leagues
+            this.state.selectedTeam = '';
+            localStorage.setItem('selectedTeam', '');
+            
+            // Update UI to reflect the change
+            this.updateLeagueDisplay(league);
+            
+            // Load new data for the selected league
+            this.loadTeams(league).then(() => {
+                // After teams are loaded, refresh all data
+                this.refreshData(true);
+                
+                // Clear player data when changing leagues
+                const playerStatsContent = document.getElementById('playerStatsContent');
+                if (playerStatsContent) {
+                    playerStatsContent.innerHTML = '<div class="text-center py-6 text-gray-500">Select a team to view player stats</div>';
+                }
+                
+                // Reset player dropdown
+                const playerSelect = document.getElementById('playerSelect');
+                if (playerSelect && playerSelect instanceof HTMLSelectElement) {
+                    // Clear player dropdown except first option
+                    while (playerSelect.options.length > 1) {
+                        playerSelect.remove(1);
+                    }
+                    playerSelect.disabled = true;
+                    playerSelect.value = '';
+                }
+            });
+            
+            // Notify other components about the league change
+            document.dispatchEvent(new CustomEvent('leagueChanged', {
+                detail: { league: league }
+            }));
+        }
     }
-
-    handleTeamChange(e) {
-        const newTeam = e.target.value;
-        console.log(`Team changed: ${this.state.selectedTeam} -> ${newTeam}`);
+    
+    handleTeamChange(event) {
+        const target = event.target;
+        if (!(target instanceof HTMLSelectElement)) return;
         
-        // Update state
-        this.state.selectedTeam = newTeam;
+        const teamId = target.value;
+        console.log('Team changed to:', teamId);
         
-        // Update UI
-        const currentTeamEl = document.getElementById('currentTeam');
-        if (currentTeamEl) {
-            const teamSelectEl = document.getElementById('teamSelect');
-            currentTeamEl.textContent = newTeam && teamSelectEl ? 
-                teamSelectEl.options[teamSelectEl.selectedIndex].text : 
-                'All Teams';
+        if (teamId !== this.state.selectedTeam) {
+            this.state.selectedTeam = teamId;
+            localStorage.setItem('selectedTeam', teamId);
+            
+            // Update UI to reflect the change
+            this.updateTeamDisplay(teamId);
+            
+            // Load new data for the selected team
+            this.refreshData(true);
+            
+            // Notify other components about the team change
+            document.dispatchEvent(new CustomEvent('teamChanged', {
+                detail: { teamId: teamId }
+            }));
+        }
+    }
+    
+    updateLeagueDisplay(league) {
+        // Update the main UI elements
+        const currentLeagueEl = document.getElementById('currentLeague');
+        if (currentLeagueEl) {
+            currentLeagueEl.textContent = league.toUpperCase();
         }
         
-        // Dispatch custom event for other components
-        window.dispatchEvent(new CustomEvent('teamChange', { 
-            detail: { 
-                teamId: newTeam,
-                league: this.state.currentLeague
-            }
-        }));
+        const dashboardLeagueNameEl = document.getElementById('dashboardLeagueName');
+        if (dashboardLeagueNameEl) {
+            dashboardLeagueNameEl.textContent = league.toUpperCase();
+        }
         
-        // Load new data
-        this.refreshData();
+        const currentLeagueNameEl = document.getElementById('currentLeagueName');
+        if (currentLeagueNameEl) {
+            currentLeagueNameEl.textContent = league.toUpperCase();
+        }
+        
+        const currentLeagueIconEl = document.getElementById('currentLeagueIcon');
+        if (currentLeagueIconEl) {
+            currentLeagueIconEl.src = `/assets/icons/leagues/${league.toLowerCase()}.svg`;
+            currentLeagueIconEl.alt = league.toUpperCase();
+        }
+        
+        // Update all league selectors
+        const leagueSelectors = document.querySelectorAll('.league-selector, #leagueSelect');
+        leagueSelectors.forEach(selector => {
+            if (selector instanceof HTMLSelectElement) {
+                selector.value = league;
+            }
+        });
+    }
+    
+    updateTeamDisplay(teamId) {
+        // Update all team selectors
+        const teamSelectors = document.querySelectorAll('.team-selector, #teamSelect');
+        teamSelectors.forEach(selector => {
+            if (selector instanceof HTMLSelectElement) {
+                selector.value = teamId;
+            }
+        });
+        
+        // Update the team name display if a team is selected
+        if (teamId) {
+            // First, we need to find the team name from the teams array
+            const teamName = this.findTeamName(teamId);
+            
+            // Update team name display
+            const currentTeamEl = document.getElementById('currentTeam');
+            if (currentTeamEl) {
+                currentTeamEl.textContent = teamName || 'Unknown Team';
+            }
+        } else {
+            // If no team is selected, show "All Teams"
+            const currentTeamEl = document.getElementById('currentTeam');
+            if (currentTeamEl) {
+                currentTeamEl.textContent = 'All Teams';
+            }
+        }
+    }
+    
+    findTeamName(teamId) {
+        // Try to get from cache first
+        const cacheKey = `teams:${this.state.currentLeague}`;
+        const cachedTeams = this.managers.cache.get(cacheKey);
+        
+        if (cachedTeams && Array.isArray(cachedTeams)) {
+            const team = cachedTeams.find(t => t.id === teamId || t.teamId === teamId);
+            if (team) {
+                return team.name || team.displayName;
+            }
+        }
+        
+        return 'Unknown Team';
     }
 
     handleGamesFilterChange() {
@@ -1156,6 +1269,118 @@ class SportsAnalyticsDashboard {
 
     showDataLoadingError(message) {
         Toast.show(`Failed to load dashboard data: ${message}. Please try again.`, 'error');
+    }
+
+    async loadDashboardData() {
+        try {
+            console.log('Loading dashboard data...');
+            LoadingState.show('dataLoad', 'Loading data...');
+            
+            const league = this.state.currentLeague;
+            const teamId = this.state.selectedTeam;
+            
+            // Load league overview data regardless of team selection
+            const leagueStatsPromise = fetch(`/api/leagues/${league}/stats`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    'Content-Type': 'application/json'
+                }
+            }).then(res => res.json());
+            
+            // Load team-specific data if a team is selected
+            let teamStatsPromise = Promise.resolve(null);
+            if (teamId) {
+                teamStatsPromise = fetch(`/api/teams/${teamId}/stats`, {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                        'Content-Type': 'application/json'
+                    }
+                }).then(res => res.json());
+            }
+            
+            // Load recent games
+            const gamesPromise = fetch(`/api/leagues/${league}/games${teamId ? `?teamId=${teamId}` : ''}`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    'Content-Type': 'application/json'
+                }
+            }).then(res => res.json());
+            
+            // Wait for all data to load
+            const [leagueStats, teamStats, games] = await Promise.all([
+                leagueStatsPromise,
+                teamStatsPromise,
+                gamesPromise
+            ]);
+            
+            // Update metrics
+            this.updateMetrics(leagueStats.data, teamStats?.data);
+            
+            // Update games list
+            this.updateGamesList(games.data);
+            
+            LoadingState.hide('dataLoad');
+            this.updateLastUpdatedTime();
+            
+        } catch (error) {
+            console.error('Error loading dashboard data:', error);
+            LoadingState.hide('dataLoad');
+            this.showError('Failed to load dashboard data. Please try again.');
+        }
+    }
+
+    updateMetrics(leagueStats, teamStats) {
+        // Update games played
+        const gamesPlayedEl = document.getElementById('gamesPlayed');
+        if (gamesPlayedEl) {
+            const gamesPlayed = teamStats ? teamStats.gamesPlayed : leagueStats.totalGamesPlayed;
+            gamesPlayedEl.textContent = gamesPlayed || 0;
+            
+            const gamesPlayedDiff = document.getElementById('gamesPlayedDiff');
+            if (gamesPlayedDiff) {
+                const diff = teamStats ? teamStats.gamesPlayedLastWeek : leagueStats.gamesPlayedLastWeek;
+                gamesPlayedDiff.textContent = diff > 0 ? `+${diff} since last week` : 'No new games';
+            }
+        }
+        
+        // Update average score
+        const avgScoreEl = document.getElementById('averageScore');
+        if (avgScoreEl) {
+            const avgScore = teamStats ? teamStats.averageScore : leagueStats.averageScore;
+            avgScoreEl.textContent = avgScore?.toFixed(1) || '0.0';
+            
+            const avgScoreDiff = document.getElementById('averageScoreDiff');
+            if (avgScoreDiff) {
+                const diff = teamStats ? teamStats.averageScoreDiff : leagueStats.averageScoreDiff;
+                avgScoreDiff.textContent = diff > 0 ? `+${diff.toFixed(1)} pts higher than average` : `${diff.toFixed(1)} pts lower than average`;
+            }
+        }
+        
+        // Update win rate
+        const winRateEl = document.getElementById('winRate');
+        if (winRateEl) {
+            const winRate = teamStats ? teamStats.winRate : leagueStats.averageWinRate;
+            winRateEl.textContent = `${(winRate * 100).toFixed(1)}%`;
+            
+            const winRateDiff = document.getElementById('winRateDiff');
+            if (winRateDiff) {
+                const avgRate = leagueStats.averageWinRate * 100;
+                winRateDiff.textContent = `${avgRate.toFixed(1)}% on average across league`;
+            }
+        }
+        
+        // Update prediction accuracy
+        const predictionAccuracyEl = document.getElementById('predictionAccuracy');
+        if (predictionAccuracyEl) {
+            const accuracy = teamStats ? teamStats.predictionAccuracy : leagueStats.overallPredictionAccuracy;
+            predictionAccuracyEl.textContent = `${(accuracy * 100).toFixed(1)}%`;
+            
+            const accuracyDiff = document.getElementById('predictionAccuracyDiff');
+            if (accuracyDiff) {
+                const diff = teamStats ? teamStats.predictionAccuracyChange : leagueStats.predictionAccuracyChange;
+                accuracyDiff.textContent = diff > 0 ? `+${diff.toFixed(1)}% improvement this month` : `${diff.toFixed(1)}% decrease this month`;
+            }
+        }
     }
 }
 

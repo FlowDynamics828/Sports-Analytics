@@ -773,40 +773,43 @@ fixFileDescriptorLimits();
 
 // 5. Create a fix for TheSportsDB API fetch issues
 function fixApiCalls() {
-  console.log('\nFixing TheSportsDB API calls...');
-  
-  const predictiveModelPath = path.join(process.cwd(), 'scripts', 'predictive_model.js');
-  if (fs.existsSync(predictiveModelPath)) {
-    let content = fs.readFileSync(predictiveModelPath, 'utf8');
+    console.log('\nFixing TheSportsDB API calls...');
     
-    // Fix the fetch import to work properly
-    if (content.includes('fetch is not a function') || content.includes('fetch(')) {
-      // First ensure node-fetch is properly imported
-      if (content.includes('const fetch = require(\'node-fetch\')')) {
-        content = content.replace(
-          'const fetch = require(\'node-fetch\')',
-          `// Properly import node-fetch for ESM/CJS compatibility
+    const predictiveModelPath = path.join(process.cwd(), 'scripts', 'predictive_model.js');
+    if (fs.existsSync(predictiveModelPath)) {
+        let content = fs.readFileSync(predictiveModelPath, 'utf8');
+        
+        // Fix the fetch import to work properly
+        if (content.includes('fetch is not a function') || content.includes('fetch(')) {
+            // First ensure node-fetch is properly imported
+            if (content.includes('const fetch = require(\'node-fetch\')')) {
+                content = content.replace(
+                    'const fetch = require(\'node-fetch\')',
+                    `// Properly import node-fetch for ESM/CJS compatibility
 const nodeFetch = require('node-fetch');
 const fetch = (...args) => {
-  return nodeFetch.default ? nodeFetch.default(...args) : nodeFetch(...args);
+    return nodeFetch.default ? nodeFetch.default(...args) : nodeFetch(...args);
 };`
-        );
-      } else {
-        // Add node-fetch import if not present
-        const importSection = content.match(/const.*require.*$/m);
-        if (importSection) {
-          const importPos = content.indexOf(importSection[0]) + importSection[0].length;
-          content = content.slice(0, importPos) + `
-// Add proper node-fetch import
+                );
+            } else {
+                // Add node-fetch import if not present
+                const importSection = content.match(/^const.*require.*$/m);
+                if (importSection) {
+                    const importPos = content.indexOf(importSection[0]) + importSection[0].length;
+                    content = content.slice(0, importPos) + `
 const nodeFetch = require('node-fetch');
 const fetch = (...args) => {
-  return nodeFetch.default ? nodeFetch.default(...args) : nodeFetch(...args);
-};`;
+    return nodeFetch.default ? nodeFetch.default(...args) : nodeFetch(...args);
+};` + content.slice(importPos);
+                }
+            }
+            
+            fs.writeFileSync(predictiveModelPath, content);
+            console.log('✅ Successfully fixed fetch API issue in predictive_model.js');
+        } else {
+            console.log('No fetch API issues found in predictive_model.js');
         }
-      }
-      
-      fs.writeFileSync(predictiveModelPath, content);
-      console.log('✅ Fixed node-fetch import in predictive_model.js');
+    } else {
+        console.log('❌ Could not find predictive_model.js at expected location');
     }
-  }
 }

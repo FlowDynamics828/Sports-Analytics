@@ -1,0 +1,15 @@
+<svg width="200" height="60" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="logo-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3D195B" />
+      <stop offset="100%" stop-color="#2A7DE1" />
+    </linearGradient>
+  </defs>
+  <rect width="200" height="60" rx="5" fill="url(#logo-gradient)"/>
+  <path d="M30,15 L40,30 L30,45 L20,30 Z" fill="#F8F8F8" stroke="#CCCCCC" stroke-width="1"/>
+  <circle cx="30" cy="30" r="5" fill="#FF5722"/>
+  <text x="55" y="28" font-family="Arial" font-size="16" font-weight="bold" fill="white">SPORTS</text>
+  <text x="55" y="44" font-family="Arial" font-size="16" font-weight="bold" fill="white">ANALYTICS</text>
+  <path d="M170,20 L180,20 L175,30 Z" fill="#F8F8F8"/>
+  <path d="M165,35 L185,35 L175,45 Z" fill="#F8F8F8"/>
+</svg> 

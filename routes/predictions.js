@@ -10,6 +10,7 @@ const { CircuitBreaker } = require('../utils/circuitBreaker');
 const { RateLimiterCluster } = require('../utils/rateLimiter');
 const { MetricsManager } = require('../utils/metricsManager');
 const asyncHandler = require('express-async-handler');
+const rateLimit = require('express-rate-limit');
 
 // Initialize managers and services
 const logger = new LogManager().logger;
@@ -37,20 +38,31 @@ const CACHE_DURATIONS = {
     HISTORY: 900     // 15 minutes
 };
 
-// Rate limiting configuration by subscription tier
+// Configure rate limits based on subscription tiers
 const RATE_LIMITS = {
-    basic: {
-        windowMs: 60 * 60 * 1000, // 1 hour
-        max: 50
-    },
-    pro: {
-        windowMs: 60 * 60 * 1000,
-        max: 200
-    },
-    enterprise: {
-        windowMs: 60 * 60 * 1000,
-        max: 1000
-    }
+    basic: { windowMs: 60000, max: 5 },        // 5 requests per minute
+    pro: { windowMs: 60000, max: 20 },         // 20 requests per minute
+    enterprise: { windowMs: 60000, max: 50 }   // 50 requests per minute
+};
+
+// Create a rate limiter middleware
+const createRateLimiter = (req, res, next) => {
+    const tier = req.user?.subscription?.tier || 'basic';
+    const limiter = rateLimit({
+        windowMs: RATE_LIMITS[tier].windowMs,
+        max: RATE_LIMITS[tier].max,
+        handler: (req, res) => {
+            logger.warn(`Rate limit exceeded for ${req.ip}`, {
+                user: req.user?.id || 'anonymous',
+                path: req.path
+            });
+            res.status(429).json({
+                error: 'Too many requests, please try again later',
+                retryAfter: Math.ceil(RATE_LIMITS[tier].windowMs / 1000)
+            });
+        }
+    });
+    return limiter(req, res, next);
 };
 
 // Validation schemas

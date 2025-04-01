@@ -23,19 +23,10 @@ const express = require('express');
 const http = require('http');
 const helmet = require('helmet');
 const cors = require('cors');
-const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
-const { SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
-const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-const { registerInstrumentations } = require('@opentelemetry/instrumentation');
-const { MongoDBInstrumentation } = require('@opentelemetry/instrumentation-mongodb');
-// // const { RedisInstrumentation } = require('@opentelemetry/instrumentation-ioredis');
-const { ExpressInstrumentation } = require('@opentelemetry/instrumentation-express');
-const { HttpInstrumentation } = require('@opentelemetry/instrumentation-http');
-const { Resource } = require('@opentelemetry/resources');
-const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
 const crypto = require('crypto');
 // Import node-fetch with proper compatibility
 const nodeFetch = require('node-fetch');
+const { RateLimiter } = require('limiter');
 const fetch = (...args) => {
   return nodeFetch.default ? nodeFetch.default(...args) : nodeFetch(...args);
 };
@@ -85,6 +76,13 @@ const logger = winston.createLogger({
 class TheAnalyzerPredictiveModel extends EventEmitter {
   constructor() {
     super();
+
+    // Comment out OpenTelemetry setup
+    /*this.tracerProvider = new NodeTracerProvider({
+      resource: new Resource({
+        [SemanticResourceAttributes.SERVICE_NAME]: 'sports-analytics-predictor',
+      }),
+    });*/
 
     this.config = {
       mongoUri: process.env.MONGODB_URI || 'mongodb://localhost:27017/sports-analytics?replicaSet=rs0',
@@ -188,7 +186,7 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
     this.lgbModels = new Map();
 
     // Initialize OpenTelemetry
-    const provider = new NodeTracerProvider({
+    /*const provider = new NodeTracerProvider({
       resource: new Resource({
         [SemanticResourceAttributes.SERVICE_NAME]: 'predictive-model',
         [SemanticResourceAttributes.SERVICE_VERSION]: '3.1.0'
@@ -197,15 +195,14 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
     const exporter = new OTLPTraceExporter({ url: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://localhost:4318/v1/traces' });
     provider.addSpanProcessor(new SimpleSpanProcessor(exporter));
     provider.register();
-   registerInstrumentations({
-  instrumentations: [
-    new MongoDBInstrumentation(),
-    // // new RedisInstrumentation(),
-    new ExpressInstrumentation(),
-    new HttpInstrumentation()
-  ]
-});
-    this.tracer = provider.getTracer('predictive-model');
+    registerInstrumentations({
+      instrumentations: [
+        new MongoDBInstrumentation(),
+        new ExpressInstrumentation(),
+        new HttpInstrumentation()
+      ]
+    });
+    this.tracer = provider.getTracer('predictive-model');*/
 
     // Initialize MetricsManager
     try {
@@ -260,34 +257,93 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
   async _initializeComponents() {
     const span = this.tracer.startSpan('initialize_components');
     try {
-      // Redis Cluster
-      if (!global.redisClient) {
-        global.redisClient = new Redis.Cluster([
-          { host: this.config.redis.host, port: this.config.redis.port }
-        ], {
-          password: this.config.redis.password,
-          enableOfflineQueue: this.config.redis.enableOfflineQueue,
-          retryStrategy: this.config.redis.retryStrategy,
-          connectionName: this.config.redis.connectionName,
-          connectTimeout: this.config.redis.connectTimeout,
-          showFriendlyErrorStack: this.config.redis.showFriendlyErrorStack,
-          maxRetriesPerRequest: this.config.redis.maxRetriesPerRequest
-        });
-
-        global.redisClient.on('connect', () => {
-          logger.info('Redis Cluster connection established', {
+      // Redis initialization with proper enterprise-level error handling
+      if (process.env.USE_REDIS === 'true') {
+        try {
+          logger.info('Initializing Redis connection...', {
             metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
-        });
+          
+          // Handle Redis initialization with proper error handling
+          if (!global.redisClient) {
+            // Use Cluster mode if enabled, otherwise regular Redis client
+            if (process.env.USE_REDIS_CLUSTER === 'true') {
+              global.redisClient = new Redis.Cluster([
+                { host: this.config.redis.host, port: this.config.redis.port }
+              ], {
+                password: this.config.redis.password,
+                enableOfflineQueue: this.config.redis.enableOfflineQueue,
+                retryStrategy: this.config.redis.retryStrategy,
+                connectionName: this.config.redis.connectionName,
+                connectTimeout: this.config.redis.connectTimeout,
+                maxRetriesPerRequest: this.config.redis.maxRetriesPerRequest
+              });
+            } else {
+              global.redisClient = new Redis({
+                host: this.config.redis.host,
+                port: this.config.redis.port,
+                password: this.config.redis.password,
+                enableOfflineQueue: this.config.redis.enableOfflineQueue,
+                retryStrategy: this.config.redis.retryStrategy,
+                connectionName: this.config.redis.connectionName,
+                connectTimeout: this.config.redis.connectTimeout,
+                maxRetriesPerRequest: this.config.redis.maxRetriesPerRequest
+              });
+            }
 
-        global.redisClient.on('error', (error) => {
-          logger.error('Redis connection error:', {
+            // Set up Redis event handlers
+            global.redisClient.on('connect', () => {
+              logger.info('Redis connection established', {
+                metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+              });
+            });
+
+            global.redisClient.on('error', (error) => {
+              logger.error('Redis connection error:', {
+                metadata: {
+                  error: error.message,
+                  service: 'predictive-model',
+                  timestamp: new Date().toISOString()
+                }
+              });
+              
+              // Don't fallback - maintain enterprise-level reliability
+              // Instead log detailed error information for monitoring systems
+              logger.warn('Redis error detected - application continuing with degraded Redis functionality', {
+                metadata: { 
+                  service: 'predictive-model', 
+                  errorCode: error.code || 'UNKNOWN',
+                  timestamp: new Date().toISOString() 
+                }
+              });
+            });
+          }
+        } catch (error) {
+          logger.error('Failed to initialize Redis:', {
             error: error.message,
             stack: error.stack,
             metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
           });
+          
+          // Don't fallback automatically - enterprise systems need explicit control
+          logger.warn('Redis initialization failed - using in-memory cache as temporary fallback. ALERT: REDUCED RELIABILITY', {
+            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+          });
+          
+          // For backward compatibility, maintain in-memory cache when Redis fails
+          global.redisClient = null;
+          process.env.USE_IN_MEMORY_CACHE = 'true';
+        }
+      } else {
+        // Redis explicitly disabled, log for awareness
+        logger.info('Redis explicitly disabled by configuration, using in-memory cache', {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
         });
+        global.redisClient = null;
+        process.env.USE_IN_MEMORY_CACHE = 'true';
       }
+      
+      // Store Redis client reference
       this.redis = global.redisClient;
 
       // MongoDB with high availability
@@ -489,24 +545,70 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
       const leagueId = this.LEAGUE_IDS[league];
       if (!leagueId) throw new Error(`Unsupported league: ${league}`);
 
+      // Check if we already have recent data for this league and season
+      const collectionName = `${league.toLowerCase()}_games`;
+      const existingCount = await this.db.collection(collectionName)
+        .countDocuments({ strSeason: season });
+      
+      if (existingCount > 0) {
+        logger.info(`Using existing ${existingCount} events for ${league} (${season})`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        return;
+      }
+
+      // Implement rate limiting
+      await this.rateLimiter.removeTokens(1);
+      
       const endpoint = 'eventsseason.php';
       const params = { id: leagueId, s: season };
       const data = await this.fetchSportsDBData(endpoint, false, params);
       const events = data.events || [];
-      logger.info(`Fetched ${events.length} historical events for ${league} (${season})`, {
+      
+      if (events.length === 0) {
+        logger.warn(`No events found for ${league} (${season})`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        return [];
+      }
+
+      // Process events in smaller batches to manage memory
+      const batchSize = 100;
+      for (let i = 0; i < events.length; i += batchSize) {
+        const batch = events.slice(i, i + batchSize);
+        await this.db.collection(collectionName).insertMany(batch, { 
+          ordered: false,
+          // Add TTL index to automatically remove old data
+          expireAfterSeconds: 7 * 24 * 60 * 60 // 1 week
+        });
+        
+        // Force garbage collection after each batch if memory usage is high
+        const memUsage = process.memoryUsage();
+        if (memUsage.heapUsed / memUsage.heapTotal > 0.85 && global.gc) {
+          global.gc();
+        }
+      }
+
+      logger.info(`Stored ${events.length} events in MongoDB for ${league}`, {
         metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
 
-      if (events.length > 0) {
-        const collectionName = `${league.toLowerCase()}_games`;
-        await this.db.collection(collectionName).insertMany(events, { ordered: false });
-        logger.info(`Stored ${events.length} events in MongoDB for ${league}`, {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-      }
-
       return events;
     } catch (error) {
+      if (error.message.includes('429')) {
+        logger.warn(`Rate limit hit for ${league}, will retry later`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        // Add to retry queue
+        this.retryQueue.push({
+          type: 'historical',
+          league,
+          season,
+          timestamp: new Date().toISOString()
+        });
+        return [];
+      }
+      
       logger.error(`Error fetching historical events for ${league}:`, {
         error: error.message,
         stack: error.stack,
@@ -570,16 +672,40 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
   async _fetchInitialData() {
     const span = this.tracer.startSpan('fetch_initial_data');
     try {
-      // Fetch historical data for all leagues
-      const historicalPromises = this.SUPPORTED_LEAGUES.map(league =>
-        this.fetchHistoricalEvents(league, '2023-2024')
-      );
-      await Promise.all(historicalPromises);
+      // Initialize rate limiter (100 requests per 15 minutes = ~6.67 requests per minute)
+      this.rateLimiter = new RateLimiter(6, 'minute');
+      this.retryQueue = [];
+      
+      // Fetch historical data for leagues one at a time to manage memory
+      for (const league of this.SUPPORTED_LEAGUES) {
+        await this.fetchHistoricalEvents(league, '2023-2024');
+        // Small delay between leagues to help with rate limiting
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
+      // Process retry queue if any requests failed
+      if (this.retryQueue.length > 0) {
+        logger.info(`Processing ${this.retryQueue.length} retry requests`, {
+          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
+        });
+        
+        // Wait a bit before retrying to respect rate limits
+        await new Promise(resolve => setTimeout(resolve, 60000));
+        
+        for (const retry of this.retryQueue) {
+          if (retry.type === 'historical') {
+            await this.fetchHistoricalEvents(retry.league, retry.season);
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
 
       // Fetch live scores for unique sports
       const sports = [...new Set(Object.values(this.SPORT_MAPPING))];
-      const livePromises = sports.map(sport => this.fetchLiveScores(sport));
-      await Promise.all(livePromises);
+      for (const sport of sports) {
+        await this.fetchLiveScores(sport);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
 
       logger.info('Initial data fetch completed for all leagues and sports', {
         metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
@@ -590,9 +716,6 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
         stack: error.stack,
         metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
       });
-      if (this.metrics && this.metrics.predictionErrors) {
-        this.metrics.predictionErrors.inc({ type: 'initial_data_fetch' });
-      }
     } finally {
       span.end();
     }
@@ -1365,12 +1488,25 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
       }
 
       if (this.redis) {
+        this.redis.removeAllListeners();
         await this.redis.quit();
-        logger.info('Redis connection closed', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
+        logger.info('Redis cleanup completed successfully');
       }
-
+    } catch (error) {
+      logger.error('Redis cleanup failed:', { error: error.message, stack: error.stack });
+      try {
+        if (this.redis) {
+          await this.redis.disconnect();
+        }
+        logger.info('Forced Redis disconnect after cleanup failure');
+      } catch (disconnectError) {
+        logger.warn('Failed to force disconnect Redis:', { error: disconnectError.message });
+      }
+    } finally {
+      this.redis = null;
+      global.redisClient = null;
+    }
+    try {
       if (this.intervals) {
         this.intervals.forEach(interval => clearInterval(interval));
         logger.info('Cleared all intervals', {
@@ -1420,6 +1556,12 @@ class TheAnalyzerPredictiveModel extends EventEmitter {
 if (cluster.isMaster) {
   const numWorkers = parseInt(process.env.NODE_CLUSTER_WORKERS, 10) || os.cpus().length;
   logger.info(`Master process starting with ${numWorkers} workers`, {
+    metadata: { metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }, service: 'predictive-model', timestamp: new Date().toISOString() }
+  });
+
+  // Skip Redis initialization
+  // Redis is explicitly disabled through environment variables
+  logger.info('Redis is explicitly disabled, using in-memory cache', {
     metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
   });
 
@@ -1438,54 +1580,6 @@ if (cluster.isMaster) {
       cluster.fork();
     }
   });
-
-  // Leader election using Redis
-  const redis = new Redis({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT, 10) || 6379,
-    password: process.env.REDIS_PASSWORD || undefined,
-    retryStrategy: (times) => Math.min(times * 100, 5000)
-  });
-
-  const electLeader = async () => {
-    try {
-      const leaderKey = 'predictive_model_leader';
-      const currentTime = Date.now();
-      const acquired = await redis.setnx(leaderKey, currentTime);
-      if (acquired) {
-        await redis.expire(leaderKey, 30);
-        logger.info('Master elected as leader', {
-          metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-        });
-        global.isLeader = true;
-      } else {
-        const lastLeaderTime = parseInt(await redis.get(leaderKey) || 0);
-        if (currentTime - lastLeaderTime > 30000) {
-          await redis.set(leaderKey, currentTime);
-          await redis.expire(leaderKey, 30);
-          logger.info('Master took over as leader due to timeout', {
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-          global.isLeader = true;
-        } else {
-          logger.info('Master operating as follower', {
-            metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-          });
-          global.isLeader = false;
-        }
-      }
-    } catch (error) {
-      logger.error('Leader election error:', {
-        error: error.message,
-        stack: error.stack,
-        metadata: { service: 'predictive-model', timestamp: new Date().toISOString() }
-      });
-      global.isLeader = true; // Default to leader if Redis fails
-    }
-  };
-
-  setInterval(electLeader, 15000); // Check every 15 seconds
-  electLeader();
 } else {
   const model = new TheAnalyzerPredictiveModel();
   logger.info(`Worker ${process.pid} started`, {

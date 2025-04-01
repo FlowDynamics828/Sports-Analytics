@@ -1,49 +1,22 @@
-// debug.js - Put this in your root directory
+// Simple debug script to run the API directly
 require('dotenv').config();
-const { MongoClient } = require('mongodb');
-const bcrypt = require('bcryptjs');
 
-async function debugAuth() {
-    const client = await MongoClient.connect(process.env.MONGODB_URI);
-    try {
-        console.log('Checking database connection...');
-        const db = client.db('sports-analytics');
-        
-        // Check for test user
-        const user = await db.collection('users').findOne({ email: 'test@example.com' });
-        console.log('\nTest user status:');
-        console.log('------------------');
-        if (user) {
-            console.log('✓ Test user exists');
-            console.log('Email:', user.email);
-            console.log('Subscription:', user.subscription);
-            console.log('Created:', user.createdAt);
-        } else {
-            console.log('✗ Test user not found');
-            
-            // Create test user if not exists
-            console.log('\nCreating test user...');
-            const hashedPassword = await bcrypt.hash('test123', 10);
-            await db.collection('users').insertOne({
-                email: 'test@example.com',
-                password: hashedPassword,
-                subscription: 'premium',
-                createdAt: new Date(),
-                preferences: {}
-            });
-            console.log('✓ Test user created');
-        }
-
-        console.log('\nLogin credentials:');
-        console.log('------------------');
-        console.log('Email: test@example.com');
-        console.log('Password: test123');
-        
-    } catch (error) {
-        console.error('Debug error:', error);
-    } finally {
-        await client.close();
-    }
+try {
+  console.log('Starting debug script...');
+  const api = require('./api');
+  
+  console.log('API module loaded successfully, initializing...');
+  
+  // Initialize the app
+  api.initializeApp().then(server => {
+    console.log('API server initialized successfully');
+  }).catch(error => {
+    console.error('Error initializing API server:', error);
+  });
+} catch (error) {
+  console.error('Error loading API module:', error);
 }
 
-debugAuth();
+// Keep process alive
+process.stdin.resume();
+console.log('Debug script running. Press Ctrl+C to exit.');

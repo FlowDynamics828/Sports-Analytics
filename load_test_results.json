@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-03-30T18:53:17.519Z",
+  "api_endpoint": "http://localhost:8000",
+  "concurrentUsers": 20,
+  "requestsPerUser": 5,
+  "totalTime": 9020,
+  "totalRequests": 100,
+  "successfulRequests": 100,
+  "failedRequests": 0,
+  "requestsPerSecond": "11.09",
+  "success_rate": "100.0"
+}

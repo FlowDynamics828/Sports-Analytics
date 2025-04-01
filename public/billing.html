@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Billing - Sports Analytics Pro</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body class="bg-gray-900 text-white">
+    <!-- Navigation -->
+    <nav class="bg-gray-800 p-4 fixed w-full z-50">
+        <div class="container mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-8">
+                <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
+                <a href="/dashboard">Dashboard</a>
+            </div>
+            <div class="flex items-center space-x-4">
+                <span id="connectionStatus" class="text-green-500">●</span>
+                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Logout</button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <div class="container mx-auto px-4 pt-24">
+        <!-- Current Plan -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-8">
+            <h2 class="text-2xl font-bold mb-4">Current Subscription</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                    <div class="mb-4">
+                        <span class="text-gray-400">Plan:</span>
+                        <span id="currentPlan" class="ml-2 font-bold"></span>
+                    </div>
+                    <div class="mb-4">
+                        <span class="text-gray-400">Status:</span>
+                        <span id="subscriptionStatus" class="ml-2"></span>
+                    </div>
+                    <div class="mb-4">
+                        <span class="text-gray-400">Next billing date:</span>
+                        <span id="nextBillingDate" class="ml-2"></span>
+                    </div>
+                </div>
+                <div>
+                    <div class="mb-4">
+                        <span class="text-gray-400">Current period usage:</span>
+                        <div class="mt-2 bg-gray-700 rounded-full h-4">
+                            <div id="usageBar" class="bg-blue-600 h-4 rounded-full transition-all duration-500"></div>
+                        </div>
+                        <div class="mt-1 text-sm text-gray-400">
+                            <span id="currentUsage"></span> / <span id="usageLimit"></span> predictions
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Payment Method -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-8">
+            <h2 class="text-2xl font-bold mb-4">Payment Method</h2>
+            <div id="currentCard" class="mb-4">
+                <div class="flex items-center">
+                    <div id="cardIcon" class="w-12 h-8 bg-gray-700 rounded mr-4"></div>
+                    <div>
+                        <div id="cardDetails" class="font-medium"></div>
+                        <div class="text-sm text-gray-400">Expires: <span id="cardExpiry"></span></div>
+                    </div>
+                </div>
+            </div>
+            <button id="updateCardBtn" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">
+                Update Payment Method
+            </button>
+        </div>
+
+        <!-- Billing History -->
+        <div class="bg-gray-800 rounded-lg p-6 mb-8">
+            <h2 class="text-2xl font-bold mb-4">Billing History</h2>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="text-left text-gray-400">
+                            <th class="pb-4">Date</th>
+                            <th class="pb-4">Description</th>
+                            <th class="pb-4">Amount</th>
+                            <th class="pb-4">Status</th>
+                            <th class="pb-4">Invoice</th>
+                        </tr>
+                    </thead>
+                    <tbody id="billingHistory"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Update Card Modal -->
+        <div id="updateCardModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center">
+            <div class="bg-gray-800 p-6 rounded-lg w-full max-w-md">
+                <h3 class="text-xl font-bold mb-4">Update Payment Method</h3>
+                <div id="card-element" class="bg-gray-700 p-4 rounded mb-4"></div>
+                <div id="card-errors" class="text-red-500 mb-4 hidden"></div>
+                <div class="flex justify-end space-x-4">
+                    <button id="cancelUpdateCard" class="px-4 py-2 rounded hover:bg-gray-700">Cancel</button>
+                    <button id="confirmUpdateCard" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Update</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize Stripe
+        const stripe = Stripe('your_publishable_key');
+        const elements = stripe.elements();
+        const card = elements.create('card');
+
+        // Load subscription data
+        async function loadSubscriptionData() {
+            try {
+                const data = JSON.parse(sessionStorage.getItem('subscriptionData'));
+                if (!data) {
+                    const response = await fetch('/api/user/subscription', {
+                        headers: {
+                            'Authorization': `Bearer ${localStorage.getItem('token')}`
+                        }
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        sessionStorage.setItem('subscriptionData', JSON.stringify(data));
+                    }
+                }
+
+                // Update UI with subscription data
+                document.getElementById('currentPlan').textContent = data.tier.toUpperCase();
+                document.getElementById('subscriptionStatus').textContent = data.status;
+                document.getElementById('nextBillingDate').textContent = new Date(data.metadata.nextBillingDate).toLocaleDateString();
+
+                // Update usage bar
+                const usagePercent = data.metadata.usagePercentage;
+                document.getElementById('usageBar').style.width = `${usagePercent}%`;
+                document.getElementById('currentUsage').textContent = data.usage.current;
+                document.getElementById('usageLimit').textContent = data.usage.limits.max;
+
+                // Load billing history
+                loadBillingHistory();
+            } catch (error) {
+                console.error('Error loading subscription data:', error);
+                showToast('error', 'Failed to load subscription data');
+            }
+        }
+
+        // Load billing history
+        async function loadBillingHistory() {
+            try {
+                const response = await fetch('/api/user/billing-history', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const history = await response.json();
+                    const tbody = document.getElementById('billingHistory');
+                    tbody.innerHTML = history.map(item => `
+                        <tr>
+                            <td class="py-2">${new Date(item.date).toLocaleDateString()}</td>
+                            <td class="py-2">${item.description}</td>
+                            <td class="py-2">$${(item.amount / 100).toFixed(2)}</td>
+                            <td class="py-2">
+                                <span class="px-2 py-1 rounded text-xs ${
+                                    item.status === 'paid' ? 'bg-green-500/20 text-green-400' :
+                                    item.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                                    'bg-red-500/20 text-red-400'
+                                }">${item.status}</span>
+                            </td>
+                            <td class="py-2">
+                                <a href="${item.invoice_pdf}" class="text-blue-400 hover:text-blue-300" target="_blank">
+                                    Download
+                                </a>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (error) {
+                console.error('Error loading billing history:', error);
+                showToast('error', 'Failed to load billing history');
+            }
+        }
+
+        // Update card handlers
+        document.getElementById('updateCardBtn').addEventListener('click', () => {
+            const modal = document.getElementById('updateCardModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            card.mount('#card-element');
+        });
+
+        document.getElementById('cancelUpdateCard').addEventListener('click', () => {
+            const modal = document.getElementById('updateCardModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            card.unmount();
+        });
+
+        document.getElementById('confirmUpdateCard').addEventListener('click', async () => {
+            const button = document.getElementById('confirmUpdateCard');
+            button.disabled = true;
+            button.textContent = 'Updating...';
+
+            try {
+                const { paymentMethod, error } = await stripe.createPaymentMethod({
+                    type: 'card',
+                    card: card,
+                });
+
+                if (error) {
+                    throw new Error(error.message);
+                }
+
+                const response = await fetch('/api/user/update-payment-method', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    },
+                    body: JSON.stringify({
+                        paymentMethodId: paymentMethod.id
+                    })
+                });
+
+                if (response.ok) {
+                    showToast('success', 'Payment method updated successfully');
+                    const modal = document.getElementById('updateCardModal');
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                    card.unmount();
+                    loadSubscriptionData();
+                } else {
+                    throw new Error('Failed to update payment method');
+                }
+            } catch (error) {
+                console.error('Error updating payment method:', error);
+                showToast('error', error.message);
+                document.getElementById('card-errors').textContent = error.message;
+                document.getElementById('card-errors').classList.remove('hidden');
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Update';
+            }
+        });
+
+        // Toast notification system
+        function showToast(type, message) {
+            const toast = document.createElement('div');
+            toast.className = `fixed bottom-4 right-4 p-4 rounded-lg text-white ${
+                type === 'error' ? 'bg-red-500' : 'bg-green-500'
+            }`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSubscriptionData();
+        });
+
+        function logout() {
+            localStorage.clear();
+            sessionStorage.clear();
+            window.location.href = '/login';
+        }
+    </script>
+</body>
+</html> 
