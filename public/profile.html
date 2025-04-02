@@ -2,167 +2,992 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Profile - Sports Analytics Pro</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            /* Core Brand Colors */
+            --primary: #3b82f6;
+            --primary-light: #60a5fa;
+            --primary-dark: #2563eb;
+            --accent: #06b6d4;
+            --accent-light: #22d3ee;
+            --accent-dark: #0891b2;
+            
+            /* UI Colors */
+            --dark: #0f172a;
+            --darker: #080e1c;
+            --darkest: #030712;
+            --light: #f1f5f9;
+            --light-gray: #94a3b8;
+            --mid-gray: #64748b;
+            --gray: #334155;
+            
+            /* Functional Colors */
+            --success: #10b981;
+            --success-light: #34d399;
+            --warning: #f59e0b;
+            --warning-light: #fbbf24;
+            --error: #ef4444;
+            --error-light: #f87171;
+            --info: #3b82f6;
+            --info-light: #60a5fa;
+            
+            /* UI Elements */
+            --border-color: rgba(148, 163, 184, 0.1);
+            --border-hover: rgba(148, 163, 184, 0.2);
+            --card-bg: rgba(15, 23, 42, 0.6);
+            --card-bg-hover: rgba(15, 23, 42, 0.8);
+            --input-bg: rgba(15, 23, 42, 0.5);
+            --input-bg-focus: rgba(15, 23, 42, 0.7);
+            --tooltip-bg: rgba(15, 23, 42, 0.95);
+            
+            /* Spacing */
+            --space-xs: 0.25rem;
+            --space-sm: 0.5rem;
+            --space-md: 1rem;
+            --space-lg: 1.5rem;
+            --space-xl: 2rem;
+            --space-2xl: 3rem;
+            --space-3xl: 4rem;
+            
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+            --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            
+            /* Typography */
+            --font-heading: 'Poppins', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            
+            /* Border Radius */
+            --radius-sm: 0.25rem;
+            --radius-md: 0.375rem;
+            --radius-lg: 0.5rem;
+            --radius-xl: 0.75rem;
+            --radius-2xl: 1rem;
+            --radius-3xl: 1.5rem;
+            --radius-full: 9999px;
+            
+            /* Transitions */
+            --transition-fast: 150ms ease;
+            --transition-normal: 300ms ease;
+            --transition-slow: 500ms ease;
+        }
+        
+        /* Reset and Base Styles */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        html {
+            font-size: 16px;
+            scroll-behavior: smooth;
+        }
+        
+        body {
+            font-family: var(--font-body);
+            color: var(--light);
+            line-height: 1.6;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--dark), var(--darker));
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        /* Create a subtle background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                radial-gradient(rgba(255, 255, 255, 0.02) 2px, transparent 2px);
+            background-size: 30px 30px, 60px 60px;
+            background-position: 0 0, 15px 15px;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Typography */
+        h1, h2, h3, h4, h5, h6 {
+            font-family: var(--font-heading);
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 1rem;
+            color: var(--light);
+        }
+        
+        h2 {
+            font-size: 1.75rem;
+            position: relative;
+            display: inline-block;
+            background: linear-gradient(90deg, var(--light), var(--light-gray));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: var(--space-lg);
+        }
+        
+        h2::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 0;
+            width: 40px;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            border-radius: 3px;
+        }
+        
+        p {
+            margin-bottom: 1rem;
+            color: var(--light-gray);
+        }
+        
+        a {
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: color var(--transition-fast);
+        }
+        
+        a:hover {
+            color: var(--accent-light);
+        }
+        
+        /* Navigation */
+        .navbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 100;
+            background-color: rgba(8, 14, 28, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+            transition: all var(--transition-normal);
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .navbar-container {
+            width: 100%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 var(--space-lg);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .navbar-left {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xl);
+        }
+        
+        .navbar-logo {
+            display: flex;
+            align-items: center;
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: var(--light);
+            text-decoration: none;
+            font-family: var(--font-heading);
+            transition: transform var(--transition-fast);
+        }
+        
+        .navbar-logo i {
+            margin-right: 0.5rem;
+            color: var(--primary);
+        }
+        
+        .navbar-logo:hover {
+            transform: translateY(-1px);
+        }
+        
+        .navbar-nav {
+            display: flex;
+            align-items: center;
+        }
+        
+        .nav-link {
+            color: var(--light-gray);
+            text-decoration: none;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all var(--transition-normal);
+            position: relative;
+            padding: 0.5rem 0;
+        }
+        
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            transition: width var(--transition-normal);
+            border-radius: var(--radius-full);
+        }
+        
+        .nav-link:hover {
+            color: var(--light);
+            transform: translateY(-1px);
+        }
+        
+        .nav-link:hover::after {
+            width: 100%;
+        }
+        
+        .navbar-right {
+            display: flex;
+            align-items: center;
+            gap: var(--space-lg);
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            font-size: 0.9rem;
+            color: var(--light-gray);
+        }
+        
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: var(--success);
+            position: relative;
+        }
+        
+        .status-indicator::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            background: var(--success);
+            animation: pulse 2s infinite;
+            z-index: -1;
+        }
+        
+        @keyframes pulse {
+            0% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0.8;
+            }
+            70% {
+                transform: translate(-50%, -50%) scale(2);
+                opacity: 0;
+            }
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0;
+            }
+        }
+
+        /* Button Styles */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.875rem 1.75rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-align: center;
+            text-decoration: none;
+            border-radius: var(--radius-md);
+            transition: all var(--transition-normal);
+            cursor: pointer;
+            border: none;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+            font-family: var(--font-body);
+            letter-spacing: 0.02em;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+        }
+        
+        .btn-primary::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--primary-dark), var(--accent));
+            opacity: 0;
+            z-index: -1;
+            transition: opacity var(--transition-normal);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(37, 99, 235, 0.3);
+        }
+        
+        .btn-primary:hover::after {
+            opacity: 1;
+        }
+        
+        .btn-primary:active {
+            transform: translateY(0);
+            box-shadow: 0 4px 8px rgba(37, 99, 235, 0.2);
+        }
+        
+        .btn-danger {
+            background: linear-gradient(135deg, var(--error), var(--error-dark, #b91c1c));
+            color: white;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+        }
+        
+        .btn-danger::after {
+            background: linear-gradient(135deg, var(--error-dark, #b91c1c), var(--error));
+        }
+        
+        .btn-danger:hover {
+            box-shadow: 0 8px 16px rgba(239, 68, 68, 0.3);
+        }
+        
+        .btn-danger:active {
+            box-shadow: 0 4px 8px rgba(239, 68, 68, 0.2);
+        }
+        
+        .btn-sm {
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .btn-block {
+            width: 100%;
+        }
+        
+        .btn-link {
+            background: transparent;
+            color: var(--primary-light);
+            padding: 0.5rem 1rem;
+            box-shadow: none;
+        }
+        
+        .btn-link:hover {
+            color: var(--accent-light);
+            transform: translateY(-1px);
+            box-shadow: none;
+        }
+        
+        .btn-icon {
+            margin-right: 0.5rem;
+        }
+        
+        /* Main Container */
+        .container {
+            width: 100%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 6rem var(--space-lg) 2rem;
+        }
+        
+        /* Card Styles */
+        .card {
+            background: linear-gradient(145deg, var(--card-bg), rgba(8, 14, 28, 0.8));
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: var(--space-xl);
+            margin-bottom: var(--space-xl);
+            box-shadow: var(--shadow-lg);
+            transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-xl);
+            border-color: var(--border-hover);
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 5px;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            opacity: 0.7;
+            transition: opacity var(--transition-normal);
+        }
+        
+        .card:hover::before {
+            opacity: 1;
+        }
+        
+        /* Grid Layout */
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: var(--space-xl);
+        }
+        
+        @media (max-width: 992px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Profile Header */
+        .profile-header {
+            display: flex;
+            align-items: center;
+            gap: var(--space-xl);
+            margin-bottom: var(--space-xl);
+        }
+        
+        .profile-image-container {
+            position: relative;
+        }
+        
+        .profile-image {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid var(--border-color);
+            transition: all var(--transition-normal);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .profile-image:hover {
+            border-color: var(--primary);
+            transform: scale(1.05);
+        }
+        
+        .profile-image-edit {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 2px solid var(--dark);
+            transition: all var(--transition-normal);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .profile-image-edit:hover {
+            transform: translateY(-2px) scale(1.1);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .profile-info {
+            flex: 1;
+        }
+        
+        .profile-name {
+            font-size: 1.75rem;
+            margin-bottom: 0.25rem;
+            background: linear-gradient(90deg, var(--light), var(--light-gray));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .profile-email {
+            color: var(--light-gray);
+            margin-bottom: 0;
+        }
+        
+        /* Form Controls */
+        .form-group {
+            margin-bottom: var(--space-lg);
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: var(--space-sm);
+            color: var(--light);
+        }
+        
+        .form-control {
+            width: 100%;
+            padding: 0.875rem var(--space-md);
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            color: var(--light);
+            font-size: 0.95rem;
+            font-family: var(--font-body);
+            transition: all var(--transition-normal);
+        }
+        
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--input-bg-focus);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        
+        .select-wrapper {
+            position: relative;
+        }
+        
+        .select-wrapper::after {
+            content: '\f107';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            right: var(--space-md);
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--light-gray);
+            pointer-events: none;
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 0.875rem var(--space-md);
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            color: var(--light);
+            font-size: 0.95rem;
+            font-family: var(--font-body);
+            appearance: none;
+            transition: all var(--transition-normal);
+        }
+        
+        .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--input-bg-focus);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        
+        /* Custom Checkbox */
+        .form-check {
+            display: flex;
+            align-items: center;
+            margin-bottom: var(--space-md);
+            cursor: pointer;
+        }
+        
+        .form-check-input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .form-check-label {
+            display: flex;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            padding-left: 2rem;
+            color: var(--light);
+            font-size: 0.95rem;
+        }
+        
+        .form-check-label::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1.25rem;
+            height: 1.25rem;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            transition: all var(--transition-fast);
+        }
+        
+        .form-check-input:checked + .form-check-label::before {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+        
+        .form-check-label::after {
+            content: '\f00c';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            left: 0.25rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 0.75rem;
+            opacity: 0;
+            transition: opacity var(--transition-fast);
+        }
+        
+        .form-check-input:checked + .form-check-label::after {
+            opacity: 1;
+        }
+        
+        .form-check-input:focus + .form-check-label::before {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        
+        /* API Key Styles */
+        .api-key-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--space-lg);
+        }
+        
+        .api-key-card {
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: var(--space-lg);
+            margin-bottom: var(--space-md);
+            transition: all var(--transition-normal);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .api-key-card:hover {
+            background: var(--input-bg-focus);
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .api-key-info {
+            flex: 1;
+        }
+        
+        .api-key-name {
+            font-weight: 600;
+            color: var(--light);
+            margin-bottom: var(--space-xs);
+        }
+        
+        .api-key-date {
+            font-size: 0.85rem;
+            color: var(--light-gray);
+        }
+        
+        /* Connected Account Styles */
+        .connected-account {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: var(--space-md) var(--space-lg);
+            margin-bottom: var(--space-md);
+            transition: all var(--transition-normal);
+        }
+        
+        .connected-account:hover {
+            background: var(--input-bg-focus);
+            border-color: var(--border-hover);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .account-info {
+            display: flex;
+            align-items: center;
+            gap: var(--space-md);
+        }
+        
+        .account-icon {
+            width: 1.5rem;
+            height: 1.5rem;
+            object-fit: contain;
+        }
+        
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: var(--space-xl);
+            right: var(--space-xl);
+            background: var(--success);
+            color: white;
+            padding: var(--space-md) var(--space-xl);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            z-index: 1000;
+            animation: slideInRight 0.3s ease forwards;
+        }
+        
+        .toast.error {
+            background: var(--error);
+        }
+        
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+        
+        /* Animations */
+        .animate-on-scroll {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all 0.8s ease;
+        }
+        
+        .animate-on-scroll.animate {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white">
+<body>
     <!-- Navigation -->
-    <nav class="bg-gray-800 p-4 fixed w-full z-50">
-        <div class="container mx-auto flex justify-between items-center">
-            <div class="flex items-center space-x-8">
-                <a href="/" class="text-2xl font-bold">Sports Analytics Pro</a>
-                <a href="/dashboard">Dashboard</a>
+    <nav class="navbar">
+        <div class="navbar-container">
+            <div class="navbar-left">
+                <a href="/" class="navbar-logo">
+                    <i class="fas fa-chart-line"></i>
+                    Sports Analytics Pro
+                </a>
+                <a href="/dashboard" class="nav-link">
+                    <i class="fas fa-tachometer-alt"></i> Dashboard
+                </a>
             </div>
-            <div class="flex items-center space-x-4">
-                <span id="connectionStatus" class="text-green-500">●</span>
-                <button onclick="logout()" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Logout</button>
+            <div class="navbar-right">
+                <div class="connection-status">
+                    <div class="status-indicator"></div>
+                    <span>Connected</span>
+                </div>
+                <button onclick="logout()" class="btn btn-primary btn-sm">
+                    <i class="fas fa-sign-out-alt btn-icon"></i> Logout
+                </button>
             </div>
         </div>
     </nav>
 
     <!-- Main Content -->
-    <div class="container mx-auto px-4 pt-24">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <!-- Profile Information -->
-            <div class="md:col-span-2">
-                <div class="bg-gray-800 rounded-lg p-6 mb-8">
-                    <h2 class="text-2xl font-bold mb-6">Profile Information</h2>
-                    <form id="profileForm" class="space-y-6">
-                        <div class="flex items-center space-x-6 mb-6">
-                            <div class="relative">
-                                <img id="profileImage" src="/images/default-avatar.png" alt="Profile" class="w-24 h-24 rounded-full object-cover">
-                                <button type="button" id="uploadPhotoBtn" class="absolute bottom-0 right-0 bg-blue-600 rounded-full p-2 hover:bg-blue-700">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                                    </svg>
-                                </button>
-                                <input type="file" id="photoInput" class="hidden" accept="image/*">
+    <div class="container">
+        <div class="grid">
+            <!-- Left Column -->
+            <div>
+                <!-- Profile Information -->
+                <div class="card animate-on-scroll">
+                    <div class="profile-header">
+                        <div class="profile-image-container">
+                            <img id="profileImage" src="/images/default-avatar.png" alt="Profile" class="profile-image">
+                            <button type="button" id="uploadPhotoBtn" class="profile-image-edit">
+                                <i class="fas fa-camera"></i>
+                            </button>
+                            <input type="file" id="photoInput" class="hidden" accept="image/*" style="display: none;">
+                        </div>
+                        <div class="profile-info">
+                            <h2 id="userName" class="profile-name"></h2>
+                            <p id="userEmail" class="profile-email"></p>
+                        </div>
+                    </div>
+
+                    <form id="profileForm">
+                        <div class="grid" style="grid-template-columns: repeat(2, 1fr);">
+                            <div class="form-group">
+                                <label for="firstName" class="form-label">First Name</label>
+                                <input type="text" id="firstName" class="form-control">
                             </div>
-                            <div>
-                                <h3 id="userName" class="text-xl font-bold"></h3>
-                                <p id="userEmail" class="text-gray-400"></p>
+                            <div class="form-group">
+                                <label for="lastName" class="form-label">Last Name</label>
+                                <input type="text" id="lastName" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="phone" class="form-label">Phone</label>
+                                <input type="tel" id="phone" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="timezone" class="form-label">Time Zone</label>
+                                <div class="select-wrapper">
+                                    <select id="timezone" class="form-select">
+                                        <!-- Timezones will be populated by JavaScript -->
+                                    </select>
+                                </div>
                             </div>
                         </div>
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-sm font-medium mb-2">First Name</label>
-                                <input type="text" id="firstName" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Last Name</label>
-                                <input type="text" id="lastName" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Phone</label>
-                                <input type="tel" id="phone" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Time Zone</label>
-                                <select id="timezone" class="w-full bg-gray-700 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <!-- Timezones will be populated by JavaScript -->
-                                </select>
-                            </div>
-                        </div>
-
-                        <button type="submit" class="w-full bg-blue-600 py-2 rounded hover:bg-blue-700">
-                            Save Changes
+                        <button type="submit" class="btn btn-primary btn-block">
+                            <i class="fas fa-save btn-icon"></i> Save Changes
                         </button>
                     </form>
                 </div>
 
                 <!-- API Keys -->
-                <div class="bg-gray-800 rounded-lg p-6 mb-8">
-                    <div class="flex justify-between items-center mb-6">
-                        <h2 class="text-2xl font-bold">API Keys</h2>
-                        <button id="generateKeyBtn" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">
-                            Generate New Key
+                <div class="card animate-on-scroll">
+                    <div class="api-key-header">
+                        <h2>API Keys</h2>
+                        <button id="generateKeyBtn" class="btn btn-primary btn-sm">
+                            <i class="fas fa-plus btn-icon"></i> Generate New Key
                         </button>
                     </div>
+                    <p class="text-light-gray mb-6">Use these keys to access the Sports Analytics Pro API programmatically.</p>
                     <div id="apiKeys" class="space-y-4">
                         <!-- API keys will be populated here -->
+                        <div class="loading-keys">
+                            <div class="flex justify-center items-center h-32">
+                                <i class="fas fa-spinner fa-spin text-2xl text-primary-light"></i>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Preferences -->
+            <!-- Right Column -->
             <div>
-                <div class="bg-gray-800 rounded-lg p-6 mb-8">
-                    <h2 class="text-2xl font-bold mb-6">Preferences</h2>
-                    <form id="preferencesForm" class="space-y-6">
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Notifications</label>
+                <!-- Preferences -->
+                <div class="card animate-on-scroll">
+                    <h2>Preferences</h2>
+                    <form id="preferencesForm">
+                        <div class="form-group">
+                            <label class="form-label">Notifications</label>
                             <div class="space-y-3">
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="emailNotifications" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">Email Notifications</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="pushNotifications" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">Push Notifications</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="smsNotifications" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">SMS Notifications</span>
-                                </label>
+                                <div class="form-check">
+                                    <input type="checkbox" id="emailNotifications" class="form-check-input">
+                                    <label for="emailNotifications" class="form-check-label">
+                                        Email Notifications
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" id="pushNotifications" class="form-check-input">
+                                    <label for="pushNotifications" class="form-check-label">
+                                        Push Notifications
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" id="smsNotifications" class="form-check-input">
+                                    <label for="smsNotifications" class="form-check-label">
+                                        SMS Notifications
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Alert Preferences</label>
+                        <div class="form-group">
+                            <label class="form-label">Alert Preferences</label>
                             <div class="space-y-3">
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="gameAlerts" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">Game Alerts</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="newsAlerts" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">News Alerts</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="predictionAlerts" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">Prediction Alerts</span>
-                                </label>
+                                <div class="form-check">
+                                    <input type="checkbox" id="gameAlerts" class="form-check-input">
+                                    <label for="gameAlerts" class="form-check-label">
+                                        Game Alerts
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" id="newsAlerts" class="form-check-input">
+                                    <label for="newsAlerts" class="form-check-label">
+                                        News Alerts
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" id="predictionAlerts" class="form-check-input">
+                                    <label for="predictionAlerts" class="form-check-label">
+                                        Prediction Alerts
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Display Preferences</label>
+                        <div class="form-group">
+                            <label class="form-label">Display Preferences</label>
                             <div class="space-y-3">
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="darkMode" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">Dark Mode</span>
-                                </label>
-                                <label class="flex items-center">
-                                    <input type="checkbox" id="compactView" class="form-checkbox rounded bg-gray-700 border-gray-600 text-blue-500">
-                                    <span class="ml-2">Compact View</span>
-                                </label>
+                                <div class="form-check">
+                                    <input type="checkbox" id="darkMode" class="form-check-input">
+                                    <label for="darkMode" class="form-check-label">
+                                        Dark Mode
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" id="compactView" class="form-check-input">
+                                    <label for="compactView" class="form-check-label">
+                                        Compact View
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
-                        <button type="submit" class="w-full bg-blue-600 py-2 rounded hover:bg-blue-700">
-                            Save Preferences
+                        <button type="submit" class="btn btn-primary btn-block">
+                            <i class="fas fa-save btn-icon"></i> Save Preferences
                         </button>
                     </form>
                 </div>
 
                 <!-- Connected Accounts -->
-                <div class="bg-gray-800 rounded-lg p-6">
-                    <h2 class="text-2xl font-bold mb-6">Connected Accounts</h2>
+                <div class="card animate-on-scroll">
+                    <h2>Connected Accounts</h2>
+                    <p class="text-light-gray mb-6">Link your accounts for seamless sign-in and data sharing.</p>
                     <div class="space-y-4">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center">
-                                <img src="/images/google-icon.png" alt="Google" class="w-6 h-6 mr-3">
+                        <div class="connected-account">
+                            <div class="account-info">
+                                <img src="/images/google-icon.png" alt="Google" class="account-icon">
                                 <span>Google</span>
                             </div>
-                            <button class="text-blue-400 hover:text-blue-300">Connect</button>
+                            <button class="btn btn-link">Connect</button>
                         </div>
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center">
-                                <img src="/images/twitter-icon.png" alt="Twitter" class="w-6 h-6 mr-3">
+                        <div class="connected-account">
+                            <div class="account-info">
+                                <img src="/images/twitter-icon.png" alt="Twitter" class="account-icon">
                                 <span>Twitter</span>
                             </div>
-                            <button class="text-blue-400 hover:text-blue-300">Connect</button>
+                            <button class="btn btn-link">Connect</button>
+                        </div>
+                        <div class="connected-account">
+                            <div class="account-info">
+                                <img src="/images/github-icon.png" alt="GitHub" class="account-icon">
+                                <span>GitHub</span>
+                            </div>
+                            <button class="btn btn-link">Connect</button>
                         </div>
                     </div>
                 </div>
@@ -174,6 +999,10 @@
         // Load user profile
         async function loadProfile() {
             try {
+                // Show loading indicators
+                document.getElementById('userName').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                document.getElementById('userEmail').innerHTML = 'Loading...';
+                
                 const response = await fetch('/api/user/profile', {
                     headers: {
                         'Authorization': `Bearer ${localStorage.getItem('token')}`
@@ -204,25 +1033,39 @@
                     document.getElementById('darkMode').checked = data.preferences?.darkMode || false;
                     document.getElementById('compactView').checked = data.preferences?.compactView || false;
                     
+                    // Set timezone if available
+                    if (data.timezone && document.getElementById('timezone').querySelector(`option[value="${data.timezone}"]`)) {
+                        document.getElementById('timezone').value = data.timezone;
+                    }
+                    
                     // Load API keys
-                    if (data.apiKeys) {
+                    if (data.apiKeys && data.apiKeys.length > 0) {
                         const apiKeysContainer = document.getElementById('apiKeys');
                         apiKeysContainer.innerHTML = data.apiKeys.map(key => `
-                            <div class="flex items-center justify-between bg-gray-700 p-4 rounded">
-                                <div>
-                                    <div class="font-medium">${key.name}</div>
-                                    <div class="text-sm text-gray-400">Created: ${new Date(key.createdAt).toLocaleDateString()}</div>
+                            <div class="api-key-card">
+                                <div class="api-key-info">
+                                    <div class="api-key-name">${key.name}</div>
+                                    <div class="api-key-date">Created: ${new Date(key.createdAt).toLocaleDateString()}</div>
                                 </div>
-                                <button class="text-red-400 hover:text-red-300" onclick="revokeApiKey('${key.id}')">
-                                    Revoke
+                                <button class="btn btn-danger btn-sm" onclick="revokeApiKey('${key.id}')">
+                                    <i class="fas fa-trash-alt"></i> Revoke
                                 </button>
                             </div>
                         `).join('');
+                    } else {
+                        document.getElementById('apiKeys').innerHTML = `
+                            <div class="text-center py-6">
+                                <p class="text-light-gray">No API keys found. Generate your first key to get started.</p>
+                            </div>
+                        `;
                     }
+                    
+                    // Add animation
+                    addAnimation();
                 }
             } catch (error) {
                 console.error('Error loading profile:', error);
-                showToast('error', 'Failed to load profile');
+                showToast('Failed to load profile', 'error');
             }
         }
 
@@ -231,7 +1074,7 @@
             e.preventDefault();
             const button = e.target.querySelector('button[type="submit"]');
             button.disabled = true;
-            button.textContent = 'Saving...';
+            button.innerHTML = '<i class="fas fa-spinner fa-spin btn-icon"></i> Saving...';
             
             try {
                 const response = await fetch('/api/user/profile', {
@@ -249,16 +1092,18 @@
                 });
                 
                 if (response.ok) {
-                    showToast('success', 'Profile updated successfully');
+                    showToast('Profile updated successfully', 'success');
+                    // Update profile display name
+                    document.getElementById('userName').textContent = `${document.getElementById('firstName').value} ${document.getElementById('lastName').value}`;
                 } else {
                     throw new Error('Failed to update profile');
                 }
             } catch (error) {
                 console.error('Error updating profile:', error);
-                showToast('error', error.message);
+                showToast(error.message, 'error');
             } finally {
                 button.disabled = false;
-                button.textContent = 'Save Changes';
+                button.innerHTML = '<i class="fas fa-save btn-icon"></i> Save Changes';
             }
         });
 
@@ -267,7 +1112,7 @@
             e.preventDefault();
             const button = e.target.querySelector('button[type="submit"]');
             button.disabled = true;
-            button.textContent = 'Saving...';
+            button.innerHTML = '<i class="fas fa-spinner fa-spin btn-icon"></i> Saving...';
             
             try {
                 const response = await fetch('/api/user/preferences', {
@@ -289,16 +1134,16 @@
                 });
                 
                 if (response.ok) {
-                    showToast('success', 'Preferences updated successfully');
+                    showToast('Preferences updated successfully', 'success');
                 } else {
                     throw new Error('Failed to update preferences');
                 }
             } catch (error) {
                 console.error('Error updating preferences:', error);
-                showToast('error', error.message);
+                showToast(error.message, 'error');
             } finally {
                 button.disabled = false;
-                button.textContent = 'Save Preferences';
+                button.innerHTML = '<i class="fas fa-save btn-icon"></i> Save Preferences';
             }
         });
 
@@ -310,6 +1155,14 @@
         document.getElementById('photoInput').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if (!file) return;
+
+            // Show loading indicator
+            const profileImage = document.getElementById('profileImage');
+            profileImage.style.opacity = '0.5';
+            
+            const uploadBtn = document.getElementById('uploadPhotoBtn');
+            uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            uploadBtn.disabled = true;
 
             const formData = new FormData();
             formData.append('photo', file);
@@ -325,20 +1178,35 @@
 
                 if (response.ok) {
                     const data = await response.json();
-                    document.getElementById('profileImage').src = data.photoUrl;
-                    showToast('success', 'Profile photo updated successfully');
+                    
+                    // Create a new timestamp to force browser to reload the image (no caching)
+                    const timestamp = new Date().getTime();
+                    document.getElementById('profileImage').src = `${data.photoUrl}?t=${timestamp}`;
+                    showToast('Profile photo updated successfully', 'success');
                 } else {
                     throw new Error('Failed to update profile photo');
                 }
             } catch (error) {
                 console.error('Error updating profile photo:', error);
-                showToast('error', error.message);
+                showToast(error.message, 'error');
+            } finally {
+                // Reset the file input
+                document.getElementById('photoInput').value = '';
+                
+                // Restore button and image
+                profileImage.style.opacity = '1';
+                uploadBtn.innerHTML = '<i class="fas fa-camera"></i>';
+                uploadBtn.disabled = false;
             }
         });
 
         // Generate API key
         document.getElementById('generateKeyBtn').addEventListener('click', async () => {
             try {
+                const button = document.getElementById('generateKeyBtn');
+                button.disabled = true;
+                button.innerHTML = '<i class="fas fa-spinner fa-spin btn-icon"></i> Generating...';
+                
                 const response = await fetch('/api/user/api-keys', {
                     method: 'POST',
                     headers: {
@@ -349,19 +1217,23 @@
 
                 if (response.ok) {
                     loadProfile(); // Reload profile to show new key
-                    showToast('success', 'API key generated successfully');
+                    showToast('API key generated successfully', 'success');
                 } else {
                     throw new Error('Failed to generate API key');
                 }
             } catch (error) {
                 console.error('Error generating API key:', error);
-                showToast('error', error.message);
+                showToast(error.message, 'error');
+            } finally {
+                const button = document.getElementById('generateKeyBtn');
+                button.disabled = false;
+                button.innerHTML = '<i class="fas fa-plus btn-icon"></i> Generate New Key';
             }
         });
 
         // Revoke API key
         async function revokeApiKey(keyId) {
-            if (!confirm('Are you sure you want to revoke this API key?')) return;
+            if (!confirm('Are you sure you want to revoke this API key? This action cannot be undone.')) return;
 
             try {
                 const response = await fetch(`/api/user/api-keys/${keyId}`, {
@@ -373,37 +1245,117 @@
 
                 if (response.ok) {
                     loadProfile(); // Reload profile to update keys list
-                    showToast('success', 'API key revoked successfully');
+                    showToast('API key revoked successfully', 'success');
                 } else {
                     throw new Error('Failed to revoke API key');
                 }
             } catch (error) {
                 console.error('Error revoking API key:', error);
-                showToast('error', error.message);
+                showToast(error.message, 'error');
             }
         }
 
         // Toast notification system
-        function showToast(type, message) {
+        function showToast(message, type = 'success') {
+            // Remove existing toasts
+            const existingToasts = document.querySelectorAll('.toast');
+            existingToasts.forEach(toast => toast.remove());
+            
+            // Create new toast
             const toast = document.createElement('div');
-            toast.className = `fixed bottom-4 right-4 p-4 rounded-lg text-white ${
-                type === 'error' ? 'bg-red-500' : 'bg-green-500'
-            }`;
-            toast.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                <span>${message}</span>
+            `;
+            
             document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 3000);
+            
+            // Automatically remove after 3 seconds
+            setTimeout(() => {
+                toast.style.animation = 'fadeOut 0.5s forwards';
+                setTimeout(() => {
+                    toast.remove();
+                }, 500);
+            }, 3000);
         }
 
         // Populate timezone select
         function populateTimezones() {
-            const timezones = moment.tz.names();
-            const select = document.getElementById('timezone');
-            timezones.forEach(timezone => {
-                const option = document.createElement('option');
-                option.value = timezone;
-                option.textContent = timezone;
-                select.appendChild(option);
+            try {
+                const timezones = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : moment.tz.names();
+                const select = document.getElementById('timezone');
+                
+                // Clear existing options
+                select.innerHTML = '';
+                
+                // Add default option
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = 'Select Timezone';
+                select.appendChild(defaultOption);
+                
+                // Sort timezones alphabetically
+                timezones.sort();
+                
+                // Add timezone options
+                timezones.forEach(timezone => {
+                    const option = document.createElement('option');
+                    option.value = timezone;
+                    option.textContent = timezone.replace(/_/g, ' ');
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error populating timezones:', error);
+                // Fallback to common timezones
+                const fallbackTimezones = [
+                    'America/New_York',
+                    'America/Chicago',
+                    'America/Denver',
+                    'America/Los_Angeles',
+                    'Europe/London',
+                    'Europe/Paris',
+                    'Asia/Tokyo',
+                    'Australia/Sydney'
+                ];
+                
+                const select = document.getElementById('timezone');
+                select.innerHTML = '';
+                
+                fallbackTimezones.forEach(timezone => {
+                    const option = document.createElement('option');
+                    option.value = timezone;
+                    option.textContent = timezone.replace(/_/g, ' ');
+                    select.appendChild(option);
+                });
+            }
+        }
+        
+        // Add animation to elements
+        function addAnimation() {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        setTimeout(() => {
+                            entry.target.classList.add('animate');
+                        }, 150);
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.1 });
+            
+            document.querySelectorAll('.animate-on-scroll').forEach((element, index) => {
+                // Stagger the animations
+                setTimeout(() => {
+                    observer.observe(element);
+                }, index * 100);
             });
+        }
+
+        // Logout function
+        function logout() {
+            localStorage.clear();
+            window.location.href = '/login';
         }
 
         // Initialize
@@ -411,11 +1363,6 @@
             loadProfile();
             populateTimezones();
         });
-
-        function logout() {
-            localStorage.clear();
-            window.location.href = '/login';
-        }
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.33/moment-timezone-with-data.min.js"></script>

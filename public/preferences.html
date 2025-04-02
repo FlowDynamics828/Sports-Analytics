@@ -2,69 +2,696 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>User Preferences - Sports Analytics Pro</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Poppins:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            /* Core Brand Colors */
+            --primary: #3b82f6;
+            --primary-light: #60a5fa;
+            --primary-dark: #2563eb;
+            --accent: #06b6d4;
+            --accent-light: #22d3ee;
+            --accent-dark: #0891b2;
+            
+            /* UI Colors */
+            --dark: #0f172a;
+            --darker: #080e1c;
+            --darkest: #030712;
+            --light: #f1f5f9;
+            --light-gray: #94a3b8;
+            --mid-gray: #64748b;
+            --gray: #334155;
+            
+            /* Functional Colors */
+            --success: #10b981;
+            --success-light: #34d399;
+            --warning: #f59e0b;
+            --warning-light: #fbbf24;
+            --error: #ef4444;
+            --error-light: #f87171;
+            --info: #3b82f6;
+            --info-light: #60a5fa;
+            
+            /* UI Elements */
+            --border-color: rgba(148, 163, 184, 0.1);
+            --border-hover: rgba(148, 163, 184, 0.2);
+            --card-bg: rgba(15, 23, 42, 0.6);
+            --card-bg-hover: rgba(15, 23, 42, 0.8);
+            --input-bg: rgba(15, 23, 42, 0.5);
+            --input-bg-focus: rgba(15, 23, 42, 0.7);
+            --tooltip-bg: rgba(15, 23, 42, 0.95);
+            
+            /* Spacing */
+            --space-xs: 0.25rem;
+            --space-sm: 0.5rem;
+            --space-md: 1rem;
+            --space-lg: 1.5rem;
+            --space-xl: 2rem;
+            --space-2xl: 3rem;
+            --space-3xl: 4rem;
+            
+            /* Shadows */
+            --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.1);
+            --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            
+            /* Typography */
+            --font-heading: 'Poppins', sans-serif;
+            --font-body: 'Inter', sans-serif;
+            
+            /* Border Radius */
+            --radius-sm: 0.25rem;
+            --radius-md: 0.375rem;
+            --radius-lg: 0.5rem;
+            --radius-xl: 0.75rem;
+            --radius-2xl: 1rem;
+            --radius-3xl: 1.5rem;
+            --radius-full: 9999px;
+            
+            /* Transitions */
+            --transition-fast: 150ms ease;
+            --transition-normal: 300ms ease;
+            --transition-slow: 500ms ease;
+        }
+        
+        /* Reset and Base Styles */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        html {
+            font-size: 16px;
+            scroll-behavior: smooth;
+        }
+        
+        body {
+            font-family: var(--font-body);
+            color: var(--light);
+            line-height: 1.6;
+            min-height: 100vh;
+            background: linear-gradient(135deg, var(--dark), var(--darker));
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        /* Create a subtle background pattern */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: 
+                radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                radial-gradient(rgba(255, 255, 255, 0.02) 2px, transparent 2px);
+            background-size: 30px 30px, 60px 60px;
+            background-position: 0 0, 15px 15px;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* Typography */
+        h1, h2, h3, h4, h5, h6 {
+            font-family: var(--font-heading);
+            font-weight: 700;
+            line-height: 1.2;
+            margin-bottom: 1rem;
+            color: var(--light);
+        }
+        
+        h2 {
+            font-size: 1.5rem;
+            position: relative;
+            display: inline-block;
+        }
+        
+        h2::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 0;
+            width: 40px;
+            height: 3px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            border-radius: 3px;
+        }
+        
+        p {
+            margin-bottom: 1rem;
+            color: var(--light-gray);
+        }
+        
+        a {
+            color: var(--primary-light);
+            text-decoration: none;
+            transition: color var(--transition-fast);
+        }
+        
+        a:hover {
+            color: var(--accent-light);
+        }
+        
+        /* Navigation */
+        .navbar {
+            position: sticky;
+            top: 0;
+            left: 0;
+            width: 100%;
+            z-index: 100;
+            background-color: rgba(8, 14, 28, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 0;
+            transition: all var(--transition-normal);
+            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
+        }
+        
+        .navbar-container {
+            width: 100%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0 var(--space-lg);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .navbar-logo {
+            display: flex;
+            align-items: center;
+            font-weight: 700;
+            font-size: 1.5rem;
+            color: var(--light);
+            text-decoration: none;
+            font-family: var(--font-heading);
+            transition: transform var(--transition-fast);
+        }
+        
+        .navbar-logo i {
+            margin-right: 0.5rem;
+            color: var(--primary);
+        }
+        
+        .navbar-logo:hover {
+            transform: translateY(-1px);
+        }
+        
+        .navbar-nav {
+            display: flex;
+            align-items: center;
+            gap: var(--space-lg);
+        }
+        
+        .nav-link {
+            color: var(--light-gray);
+            text-decoration: none;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all var(--transition-normal);
+            position: relative;
+            padding: 0.5rem 0;
+        }
+        
+        .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            transition: width var(--transition-normal);
+            border-radius: var(--radius-full);
+        }
+        
+        .nav-link:hover {
+            color: var(--light);
+            transform: translateY(-1px);
+        }
+        
+        .nav-link:hover::after {
+            width: 100%;
+        }
+
+        /* Button Styles */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.875rem 1.75rem;
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-align: center;
+            text-decoration: none;
+            border-radius: var(--radius-md);
+            transition: all var(--transition-normal);
+            cursor: pointer;
+            border: none;
+            position: relative;
+            overflow: hidden;
+            z-index: 1;
+            font-family: var(--font-body);
+            letter-spacing: 0.02em;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+        }
+        
+        .btn-primary::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(135deg, var(--primary-dark), var(--accent));
+            opacity: 0;
+            z-index: -1;
+            transition: opacity var(--transition-normal);
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(37, 99, 235, 0.3);
+        }
+        
+        .btn-primary:hover::after {
+            opacity: 1;
+        }
+        
+        .btn-primary:active {
+            transform: translateY(0);
+            box-shadow: 0 4px 8px rgba(37, 99, 235, 0.2);
+        }
+        
+        .btn-primary[disabled] {
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        /* Main Container */
+        .container {
+            width: 100%;
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 2rem var(--space-lg);
+        }
+        
+        /* Card Styles */
+        .card {
+            background: linear-gradient(145deg, var(--card-bg), rgba(8, 14, 28, 0.8));
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-xl);
+            padding: var(--space-xl);
+            margin-bottom: var(--space-xl);
+            box-shadow: var(--shadow-lg);
+            transition: transform var(--transition-normal), box-shadow var(--transition-normal);
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-xl);
+            border-color: var(--border-hover);
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 5px;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            opacity: 0.7;
+            transition: opacity var(--transition-normal);
+        }
+        
+        .card:hover::before {
+            opacity: 1;
+        }
+        
+        /* Grid Layout */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--space-xl);
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Form Controls */
+        .form-group {
+            margin-bottom: var(--space-lg);
+        }
+        
+        .form-label {
+            display: block;
+            font-size: 0.95rem;
+            font-weight: 600;
+            margin-bottom: var(--space-sm);
+            color: var(--light);
+        }
+        
+        .select-wrapper {
+            position: relative;
+        }
+        
+        .select-wrapper::after {
+            content: '\f107';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            right: var(--space-md);
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--light-gray);
+            pointer-events: none;
+        }
+        
+        .form-select {
+            width: 100%;
+            padding: 0.875rem var(--space-md);
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            color: var(--light);
+            font-size: 0.95rem;
+            font-family: var(--font-body);
+            appearance: none;
+            transition: all var(--transition-normal);
+        }
+        
+        .form-select:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--input-bg-focus);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        
+        /* Custom Checkbox */
+        .form-check {
+            display: flex;
+            align-items: center;
+            margin-bottom: var(--space-md);
+            cursor: pointer;
+        }
+        
+        .form-check-input {
+            position: absolute;
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .form-check-label {
+            display: flex;
+            align-items: center;
+            position: relative;
+            cursor: pointer;
+            padding-left: 2rem;
+            color: var(--light);
+            font-size: 0.95rem;
+        }
+        
+        .form-check-label::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1.25rem;
+            height: 1.25rem;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            transition: all var(--transition-fast);
+        }
+        
+        .form-check-input:checked + .form-check-label::before {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+        
+        .form-check-label::after {
+            content: '\f00c';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            left: 0.25rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 0.75rem;
+            opacity: 0;
+            transition: opacity var(--transition-fast);
+        }
+        
+        .form-check-input:checked + .form-check-label::after {
+            opacity: 1;
+        }
+        
+        .form-check-input:focus + .form-check-label::before {
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+        
+        /* Team Selection */
+        .team-selector {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: var(--space-md);
+            margin: var(--space-md) 0;
+        }
+        
+        .team-card {
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: var(--space-md);
+            text-align: center;
+            cursor: pointer;
+            transition: all var(--transition-normal);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .team-card:hover {
+            border-color: var(--primary-light);
+            transform: translateY(-3px);
+            box-shadow: var(--shadow-md);
+        }
+        
+        .team-card.selected {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: var(--primary);
+        }
+        
+        .team-card.selected::before {
+            content: '\f00c';
+            font-family: 'Font Awesome 6 Free';
+            font-weight: 900;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: var(--primary);
+            font-size: 0.9rem;
+        }
+        
+        .team-logo {
+            width: 50px;
+            height: 50px;
+            object-fit: contain;
+            margin: 0 auto var(--space-sm);
+            transition: transform var(--transition-normal);
+        }
+        
+        .team-card:hover .team-logo {
+            transform: scale(1.1);
+        }
+        
+        .team-name {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--light);
+        }
+        
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: var(--space-xl);
+            right: var(--space-xl);
+            background: var(--success);
+            color: white;
+            padding: var(--space-md) var(--space-xl);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: var(--space-sm);
+            z-index: 1000;
+            animation: slideInRight 0.3s ease forwards;
+        }
+        
+        .toast.error {
+            background: var(--error);
+        }
+        
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white">
-    <nav class="bg-gray-800 p-4">
-        <div class="container mx-auto flex justify-between items-center">
-            <a href="/dashboard" class="text-2xl font-bold">Sports Analytics Pro</a>
-            <div class="space-x-4">
-                <a href="/dashboard" class="hover:text-blue-400">Dashboard</a>
-                <button id="savePreferences" class="bg-blue-600 px-4 py-2 rounded hover:bg-blue-700">Save Changes</button>
+<body>
+    <nav class="navbar">
+        <div class="navbar-container">
+            <a href="/dashboard" class="navbar-logo">
+                <i class="fas fa-chart-line"></i>
+                Sports Analytics Pro
+            </a>
+            <div class="navbar-nav">
+                <a href="/dashboard" class="nav-link">
+                    <i class="fas fa-tachometer-alt mr-2"></i> Dashboard
+                </a>
+                <button id="savePreferences" class="btn btn-primary">
+                    <i class="fas fa-save mr-2"></i> Save Changes
+                </button>
             </div>
         </div>
     </nav>
 
-    <div class="container mx-auto px-4 py-8">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+    <div class="container">
+        <div class="grid">
             <!-- Favorite Teams -->
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-xl font-bold mb-4">Favorite Teams</h2>
-                <div id="teamSelections" class="space-y-4">
+            <div class="card animate-on-scroll">
+                <h2>Favorite Teams</h2>
+                <p class="text-light-gray mb-4">Select your favorite teams to customize your dashboard experience.</p>
+                <div id="teamSelections" class="team-selector">
                     <!-- Teams will be populated here -->
+                    <div class="loading-teams">
+                        <div class="flex justify-center items-center h-32">
+                            <i class="fas fa-spinner fa-spin text-2xl text-primary-light"></i>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <!-- Notification Settings -->
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-xl font-bold mb-4">Notifications</h2>
+            <div class="card animate-on-scroll">
+                <h2>Notifications</h2>
+                <p class="text-light-gray mb-4">Choose which notifications you want to receive.</p>
                 <div class="space-y-4">
-                    <div class="flex items-center">
-                        <input type="checkbox" id="gameAlerts" class="mr-3">
-                        <label>Game Alerts</label>
+                    <div class="form-check">
+                        <input type="checkbox" id="gameAlerts" class="form-check-input">
+                        <label for="gameAlerts" class="form-check-label">
+                            Game Alerts
+                        </label>
                     </div>
-                    <div class="flex items-center">
-                        <input type="checkbox" id="scoreUpdates" class="mr-3">
-                        <label>Score Updates</label>
+                    <div class="form-check">
+                        <input type="checkbox" id="scoreUpdates" class="form-check-input">
+                        <label for="scoreUpdates" class="form-check-label">
+                            Score Updates
+                        </label>
                     </div>
-                    <div class="flex items-center">
-                        <input type="checkbox" id="newsAlerts" class="mr-3">
-                        <label>News Alerts</label>
+                    <div class="form-check">
+                        <input type="checkbox" id="newsAlerts" class="form-check-input">
+                        <label for="newsAlerts" class="form-check-label">
+                            News Alerts
+                        </label>
                     </div>
                 </div>
             </div>
 
             <!-- Display Settings -->
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h2 class="text-xl font-bold mb-4">Display Settings</h2>
-                <div class="space-y-4">
-                    <div>
-                        <label class="block mb-2">Default League</label>
-                        <select id="defaultLeague" class="w-full bg-gray-700 p-2 rounded">
-                            <option value="nba">NBA</option>
-                            <option value="nfl">NFL</option>
-                            <option value="mlb">MLB</option>
-                            <option value="nhl">NHL</option>
-                        </select>
+            <div class="card animate-on-scroll">
+                <h2>Display Settings</h2>
+                <p class="text-light-gray mb-4">Customize how you want to see your data.</p>
+                <div class="space-y-6">
+                    <div class="form-group">
+                        <label for="defaultLeague" class="form-label">Default League</label>
+                        <div class="select-wrapper">
+                            <select id="defaultLeague" class="form-select">
+                                <option value="nba">NBA</option>
+                                <option value="nfl">NFL</option>
+                                <option value="mlb">MLB</option>
+                                <option value="nhl">NHL</option>
+                            </select>
+                        </div>
                     </div>
-                    <div>
-                        <label class="block mb-2">Data Refresh Rate</label>
-                        <select id="refreshRate" class="w-full bg-gray-700 p-2 rounded">
-                            <option value="30">30 seconds</option>
-                            <option value="60">1 minute</option>
-                            <option value="300">5 minutes</option>
-                        </select>
+                    <div class="form-group">
+                        <label for="refreshRate" class="form-label">Data Refresh Rate</label>
+                        <div class="select-wrapper">
+                            <select id="refreshRate" class="form-select">
+                                <option value="30">30 seconds</option>
+                                <option value="60">1 minute</option>
+                                <option value="300">5 minutes</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Advanced Settings -->
+            <div class="card animate-on-scroll">
+                <h2>Advanced Settings</h2>
+                <p class="text-light-gray mb-4">Fine-tune your analytics experience.</p>
+                <div class="space-y-6">
+                    <div class="form-group">
+                        <label for="dataPrecision" class="form-label">Statistical Precision</label>
+                        <div class="select-wrapper">
+                            <select id="dataPrecision" class="form-select">
+                                <option value="1">Basic (Faster Loading)</option>
+                                <option value="2" selected>Standard</option>
+                                <option value="3">Advanced</option>
+                                <option value="4">Ultra Precision (Slower Loading)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" id="compactView" class="form-check-input">
+                        <label for="compactView" class="form-check-label">
+                            Compact Dashboard View
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input type="checkbox" id="enhancedVisuals" class="form-check-input" checked>
+                        <label for="enhancedVisuals" class="form-check-label">
+                            Enable Enhanced Visualizations
+                        </label>
                     </div>
                 </div>
             </div>
@@ -79,6 +706,7 @@
             
             ws.onopen = () => {
                 console.log('WebSocket connected');
+                showToast('Connected to realtime updates', 'success');
                 loadUserPreferences();
             };
 
@@ -102,8 +730,23 @@
                 });
                 const prefs = await response.json();
                 updatePreferencesUI(prefs);
+                
+                // Mock team data for demo
+                const mockTeams = [
+                    { id: 'lakers', name: 'Lakers', logo: '/images/teams/nba/lakers.svg', league: 'nba' },
+                    { id: 'celtics', name: 'Celtics', logo: '/images/teams/nba/celtics.svg', league: 'nba' },
+                    { id: 'warriors', name: 'Warriors', logo: '/images/teams/nba/warriors.svg', league: 'nba' },
+                    { id: 'heat', name: 'Heat', logo: '/images/teams/nba/heat.svg', league: 'nba' },
+                    { id: 'cowboys', name: 'Cowboys', logo: '/images/teams/nfl/cowboys.svg', league: 'nfl' },
+                    { id: 'patriots', name: 'Patriots', logo: '/images/teams/nfl/patriots.svg', league: 'nfl' },
+                    { id: 'yankees', name: 'Yankees', logo: '/images/teams/mlb/yankees.svg', league: 'mlb' },
+                    { id: 'dodgers', name: 'Dodgers', logo: '/images/teams/mlb/dodgers.svg', league: 'mlb' }
+                ];
+                
+                populateTeamSelection(mockTeams, prefs.favoriteTeams || []);
             } catch (error) {
                 console.error('Error loading preferences:', error);
+                showToast('Error loading preferences', 'error');
             }
         }
 
@@ -116,10 +759,56 @@
             // Update selects
             document.getElementById('defaultLeague').value = prefs.displaySettings?.defaultLeague || 'nba';
             document.getElementById('refreshRate').value = prefs.displaySettings?.refreshRate || '60';
+            
+            // Update additional preferences if they exist
+            if (document.getElementById('compactView')) {
+                document.getElementById('compactView').checked = prefs.displaySettings?.compactView || false;
+            }
+            
+            if (document.getElementById('enhancedVisuals')) {
+                document.getElementById('enhancedVisuals').checked = prefs.displaySettings?.enhancedVisuals !== false;
+            }
+            
+            if (document.getElementById('dataPrecision')) {
+                document.getElementById('dataPrecision').value = prefs.displaySettings?.dataPrecision || '2';
+            }
+        }
+        
+        function populateTeamSelection(teams, favoriteTeams = []) {
+            const container = document.getElementById('teamSelections');
+            container.innerHTML = '';
+            
+            teams.forEach(team => {
+                const isSelected = favoriteTeams.includes(team.id);
+                const teamCard = document.createElement('div');
+                teamCard.className = `team-card ${isSelected ? 'selected' : ''}`;
+                teamCard.dataset.teamId = team.id;
+                teamCard.innerHTML = `
+                    <img src="${team.logo}" alt="${team.name}" class="team-logo">
+                    <div class="team-name">${team.name}</div>
+                `;
+                
+                teamCard.addEventListener('click', () => {
+                    teamCard.classList.toggle('selected');
+                });
+                
+                container.appendChild(teamCard);
+            });
         }
 
         document.getElementById('savePreferences').addEventListener('click', async () => {
+            // Show loading state
+            const saveBtn = document.getElementById('savePreferences');
+            const originalBtnText = saveBtn.innerHTML;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> Saving...';
+            saveBtn.disabled = true;
+            
+            // Get selected teams
+            const selectedTeams = Array.from(document.querySelectorAll('.team-card.selected'))
+                .map(card => card.dataset.teamId);
+            
             const preferences = {
+                favoriteTeams: selectedTeams,
                 notifications: {
                     gameAlerts: document.getElementById('gameAlerts').checked,
                     scoreUpdates: document.getElementById('scoreUpdates').checked,
@@ -127,7 +816,10 @@
                 },
                 displaySettings: {
                     defaultLeague: document.getElementById('defaultLeague').value,
-                    refreshRate: document.getElementById('refreshRate').value
+                    refreshRate: document.getElementById('refreshRate').value,
+                    compactView: document.getElementById('compactView')?.checked || false,
+                    enhancedVisuals: document.getElementById('enhancedVisuals')?.checked || true,
+                    dataPrecision: document.getElementById('dataPrecision')?.value || '2'
                 }
             };
 
@@ -140,13 +832,78 @@
                     },
                     body: JSON.stringify(preferences)
                 });
-                alert('Preferences saved successfully!');
+                
+                showToast('Preferences saved successfully!', 'success');
             } catch (error) {
-                alert('Error saving preferences');
+                showToast('Error saving preferences', 'error');
+                console.error('Error:', error);
+            } finally {
+                // Restore button
+                saveBtn.innerHTML = originalBtnText;
+                saveBtn.disabled = false;
+                
+                // Add button success animation
+                saveBtn.classList.add('btn-success');
+                setTimeout(() => {
+                    saveBtn.classList.remove('btn-success');
+                }, 2000);
             }
         });
-
-        connectWebSocket();
+        
+        function handleRealtimeUpdate(data) {
+            console.log('Realtime update received:', data);
+            // Handle different types of updates
+            if (data.type === 'preference_update') {
+                updatePreferencesUI(data.preferences);
+            }
+        }
+        
+        function showToast(message, type = 'success') {
+            // Remove existing toasts
+            const existingToasts = document.querySelectorAll('.toast');
+            existingToasts.forEach(toast => toast.remove());
+            
+            // Create new toast
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+                <span>${message}</span>
+            `;
+            
+            document.body.appendChild(toast);
+            
+            // Automatically remove after 3 seconds
+            setTimeout(() => {
+                toast.style.animation = 'fadeOut 0.5s forwards';
+                setTimeout(() => {
+                    toast.remove();
+                }, 500);
+            }, 3000);
+        }
+        
+        // Initialize animations
+        function initScrollAnimations() {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('animate');
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.2 });
+            
+            // Observe all elements with animate-on-scroll class
+            document.querySelectorAll('.animate-on-scroll').forEach(element => {
+                observer.observe(element);
+            });
+        }
+        
+        // Run on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            connectWebSocket();
+            initScrollAnimations();
+        });
     </script>
 </body>
 </html>

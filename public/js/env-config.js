@@ -1,42 +1,77 @@
 /**
  * Sports Analytics Pro - Environment Configuration
- * This file sets up environment variables and API keys for the application.
+ * This file contains environment-specific configuration values
+ * It's loaded before all other JavaScript files
  */
 
-// Create a global ENV object to store environment variables
-window.ENV = window.ENV || {};
-
-// API Keys
-window.ENV.THESPORTSDB_API_KEY = '447279';  // TheSportsDB API key
-
-// API Endpoints
-window.ENV.API_ENDPOINTS = {
-    THESPORTSDB_URL: 'https://www.thesportsdb.com/api/v1/json',
-    BACKEND_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-        ? 'http://localhost:5050/api' 
-        : 'https://api.sportsanalyticspro.com/api'
+// Global environment configuration
+window.ENV_CONFIG = {
+  // API Configuration
+  API_BASE_URL: 'http://localhost:5000/api',
+  API_TIMEOUT: 30000, // 30 seconds
+  API_VERSION: 'v1',
+  
+  // Feature Flags
+  ENABLE_LIVE_SCORES: true,
+  ENABLE_AI_INSIGHTS: true,
+  ENABLE_PREDICTIONS: true,
+  ENABLE_ANALYTICS: true,
+  
+  // App Configuration
+  APP_VERSION: '1.0.0',
+  DEBUG_MODE: true,
+  
+  // Authentication
+  AUTH_ENABLED: false,
+  AUTH_PROVIDER: 'local', // 'local', 'oauth', 'jwt'
+  
+  // External Service API Keys (use environment variables in production)
+  SERVICES: {
+    SPORTS_DATA_API_KEY: '447279', // TheSportsDB API key - production key
+    WEATHER_API_KEY: 'demo_weather_key',
+    ANALYTICS_TRACKING_ID: 'UA-DEMO-ID'
+  },
+  
+  // Default Sport Settings
+  DEFAULT_SPORT: 'soccer',
+  DEFAULT_LEAGUE: '4328', // Premier League
+  
+  // Content Settings
+  REFRESH_INTERVALS: {
+    LIVE_MATCHES: 60000,  // 60 seconds
+    STANDINGS: 300000,    // 5 minutes
+    AI_INSIGHTS: 300000   // 5 minutes
+  }
 };
 
-// Feature Flags
-window.ENV.FEATURES = {
-    USE_REAL_DATA: true,           // Prefer real API data over mock data
-    ENABLE_CACHING: true,          // Enable data caching for better performance
-    ENABLE_ERROR_REPORTING: true,  // Enable error reporting
-    ENABLE_ANALYTICS: true         // Enable analytics tracking
-};
+// Initialize analytics if enabled
+if (window.ENV_CONFIG.ENABLE_ANALYTICS) {
+  // In production, replace with actual analytics code
+  window.analytics = {
+    track: (event, properties) => {
+      if (window.ENV_CONFIG.DEBUG_MODE) {
+        console.log('[Analytics]', event, properties);
+      }
+    },
+    identify: (userId, traits) => {
+      if (window.ENV_CONFIG.DEBUG_MODE) {
+        console.log('[Analytics] Identify', userId, traits);
+      }
+    },
+    page: (name, properties) => {
+      if (window.ENV_CONFIG.DEBUG_MODE) {
+        console.log('[Analytics] Page', name, properties);
+      }
+    }
+  };
+}
 
-// Configure cache settings
-window.ENV.CACHE_CONFIG = {
-    DEFAULT_TTL: 3600000,  // Default cache time-to-live in milliseconds (1 hour)
-    LEAGUE_DATA_TTL: 86400000,  // League data cache TTL (24 hours)
-    TEAM_DATA_TTL: 3600000,  // Team data cache TTL (1 hour)
-    PLAYER_DATA_TTL: 3600000  // Player data cache TTL (1 hour)
-};
+// Set debug mode based on URL parameter (for easier testing)
+if (window.location.search.includes('debug=true')) {
+  window.ENV_CONFIG.DEBUG_MODE = true;
+  console.log('Debug mode enabled');
+  console.log('Environment Configuration:', window.ENV_CONFIG);
+}
 
-// Log configuration
-console.log('Environment configuration loaded');
-console.log('API configuration:', {
-    theSportsDbUrl: window.ENV.API_ENDPOINTS.THESPORTSDB_URL,
-    backendUrl: window.ENV.API_ENDPOINTS.BACKEND_URL,
-    useRealData: window.ENV.FEATURES.USE_REAL_DATA
-}); 
+// Log the API URL when loading
+console.log('API Base URL configured as:', window.ENV_CONFIG.API_BASE_URL); 

@@ -1,0 +1,46 @@
+/* Custom fixes for Sports Analytics Dashboard */
+
+/* Global scaling for the entire site - increases from 80% to 90% for better nav visibility */
+html {
+    font-size: 14.4px !important; /* 16px * 0.9 = 14.4px (adjusted from 12.8px) */
+}
+
+body {
+    transform-origin: top center;
+    transform: scale(0.9) !important; /* Increased from 0.8 to 0.9 */
+    width: 111.11% !important; /* 100% / 0.9 = 111.11% - compensates for the scale */
+    margin: 0 auto;
+    min-height: 110vh; /* Keeps the reduced height from previous edit */
+    padding-top: 0.5vh; /* Reduced padding at top for better position */
+}
+
+/* Additional text rendering improvements for clarity */
+nav, h1, h2, h3, h4, h5, h6 {
+    text-rendering: geometricPrecision !important;
+    -webkit-font-smoothing: antialiased !important;
+    -moz-osx-font-smoothing: grayscale !important;
+}
+
+/* Make nav links slightly bolder and clearer */
+nav .nav-link {
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+}
+
+/* Fix heading alignment */
+.section-title {
+    text-align: left !important;
+    margin-bottom: 1.5rem !important;
+    line-height: 1.3 !important;
+}
+
+/* Move hero image slightly */
+.hero-content .hero-image {
+    margin-left: 2rem !important;
+    margin-top: -1rem !important;
+}
+
+/* Make cards sharper */
+.card, .dashboard-card {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06) !important;
+} 
