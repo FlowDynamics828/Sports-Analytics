@@ -26,7 +26,10 @@ class PredictionEngine extends Component {
         sportType: 'soccer',
         homeTeam: 'Liverpool',
         awayTeam: 'Manchester City'
-      }
+      },
+      alwaysAttemptRealData: true, // Always try to get real data first
+      maxRetries: 2, // Number of retries for API calls
+      retryDelay: 1000 // Delay between retries in ms
     }, options));
     
     // Component state
@@ -140,23 +143,74 @@ class PredictionEngine extends Component {
    */
   async getPrediction(formData) {
     try {
-      // Try to fetch from API
-      const response = await fetch(this.options.apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(formData)
-      });
+      // Try to fetch from API multiple times
+      let attemptCount = 0;
+      let lastError = null;
       
-      if (!response.ok) {
-        throw new Error(`API request failed with status ${response.status}`);
+      while (attemptCount <= this.options.maxRetries) {
+        try {
+          this.debug(`API attempt ${attemptCount + 1}/${this.options.maxRetries + 1}`);
+          
+          const response = await fetch(this.options.apiEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+          });
+          
+          if (!response.ok) {
+            throw new Error(`API request failed with status ${response.status}`);
+          }
+          
+          const data = await response.json();
+          
+          if (data && (data.homeWinProbability !== undefined || data.prediction !== undefined)) {
+            this.debug('Successfully fetched real prediction data');
+            return data;
+          } else {
+            throw new Error('Invalid API response structure');
+          }
+        } catch (error) {
+          lastError = error;
+          attemptCount++;
+          
+          if (attemptCount <= this.options.maxRetries) {
+            this.debug(`Retry attempt ${attemptCount} after error: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, this.options.retryDelay));
+          }
+        }
       }
       
-      return await response.json();
+      // All API attempts failed, use fallback
+      throw lastError || new Error('Failed to get prediction after multiple attempts');
       
     } catch (apiError) {
       this.debug('API call failed:', apiError);
+      
+      // Try alternate endpoint if available
+      try {
+        if (this.options.alternateApiEndpoint) {
+          this.debug('Trying alternate API endpoint');
+          const altResponse = await fetch(this.options.alternateApiEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+          });
+          
+          if (altResponse.ok) {
+            const altData = await altResponse.json();
+            if (altData && (altData.homeWinProbability !== undefined || altData.prediction !== undefined)) {
+              this.debug('Successfully fetched prediction from alternate endpoint');
+              return altData;
+            }
+          }
+        }
+      } catch (altError) {
+        this.debug('Alternate API endpoint also failed:', altError);
+      }
       
       // Use demo data if fallback mode is enabled
       if (this.options.fallbackMode) {

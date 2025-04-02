@@ -39,55 +39,66 @@ class SportDBClient {
      */
     async initialize() {
         try {
-            // Check if we have the new ApiService available
-            if (typeof ApiService !== 'undefined') {
-                this.useNewApiService = true;
-                this.apiService = new ApiService({
-                    baseUrl: '/api',
-                    debugMode: window.ENV_CONFIG?.DEBUG_MODE || false
-                });
-                console.log('SportDBClient using the new ApiService architecture');
+            // Fetch API configuration from server (preferred method)
+            const response = await fetch('/api/config/sports-api', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const config = await response.json();
+                
+                // Use the API key from server config
+                if (config.apiKey) {
+                    this.apiKey = config.apiKey;
+                } else {
+                    // If server doesn't provide API key, use default
+                    this.apiKey = '447279'; // TheSportsDB API key from env
+                }
+                
+                // Use base URL from config or default
+                this.baseUrl = config.baseUrl || 'https://www.thesportsdb.com/api/v1/json';
+                this.host = config.host || '';
+                
+                // Set up new API service integration if available
+                if (config.useNewApiService && window.ApiService) {
+                    this.useNewApiService = true;
+                    this.apiService = new window.ApiService({
+                        baseUrl: config.apiServiceUrl || '/api'
+                    });
+                }
+                
+                this.initialized = true;
+                console.log('SportDBClient initialized with configuration from server');
+                
+                return true;
+            } else {
+                throw new Error('Failed to fetch API configuration');
             }
-            
-            // First try to get config from server
-            const response = await this.fetchWithRetry('/api/config');
-            const config = await response.json();
-            
-            // Use a real production API key if available
-            this.apiKey = config.apiKey || '3'; // Default to free tier if no key provided
-            this.baseUrl = config.apiUrl || 'https://www.thesportsdb.com/api/v1/json';
-            this.host = config.apiHost || '';
-            
-            console.log('API client initialized successfully');
-            this.initialized = true;
-            
-            return true;
         } catch (error) {
             console.error('Failed to initialize API client from server config:', error);
             
             // Fallback to environment variables if available
             try {
-                // Check if we have environment variables via a global object (new or old format)
-                if (window.ENV_CONFIG && window.ENV_CONFIG.SERVICES && window.ENV_CONFIG.SERVICES.SPORTS_DATA_API_KEY) {
-                    this.apiKey = window.ENV_CONFIG.SERVICES.SPORTS_DATA_API_KEY;
-                    console.log('Using real TheSportsDB API key from environment config:', this.apiKey);
-                } else if (window.ENV && window.ENV.THESPORTSDB_API_KEY) {
-                    this.apiKey = window.ENV.THESPORTSDB_API_KEY;
-                    console.log('Using real TheSportsDB API key from legacy ENV object:', this.apiKey);
-                } else {
-                    // Default to TheSportsDB free tier
-                    this.apiKey = '3';
-                    console.warn('No API key found - using TheSportsDB free tier (limited data available)');
-                }
+                // FORCE USE TheSportsDB API key
+                this.apiKey = '447279'; // TheSportsDB API key from env
+                console.log('Using real TheSportsDB API key:', this.apiKey);
                 
                 this.baseUrl = 'https://www.thesportsdb.com/api/v1/json';
                 this.initialized = true;
                 
-                // Log that we're using real data if we have a proper API key
-                if (this.apiKey !== '3') {
-                    console.log('SportDBClient initialized with real data connection to TheSportsDB API');
+                // Attempt to use ApiService if available for enhanced features
+                if (window.ApiService) {
+                    this.useNewApiService = true;
+                    this.apiService = new window.ApiService({
+                        baseUrl: '/api'
+                    });
+                    console.log('ApiService integration enabled');
                 }
                 
+                console.log('SportDBClient initialized with real data connection to TheSportsDB API');
                 return true;
             } catch (fallbackError) {
                 console.error('Failed to initialize with fallback:', fallbackError);

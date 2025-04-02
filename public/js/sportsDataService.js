@@ -17,7 +17,9 @@ class SportsDataService {
             timeout: 10000,      // Request timeout in milliseconds
             retryAttempts: 3,    // Number of retry attempts
             retryDelay: 1000,    // Delay between retries in milliseconds
-            preferRealData: true // Always prefer real data over mock data
+            preferRealData: true, // Always prefer real data over mock data
+            fallbackToMock: true, // Fall back to mock data if API fails
+            useMockDataWhenOffline: true // Use mock data when offline
         };
         
         // API key validation
@@ -25,8 +27,9 @@ class SportsDataService {
             console.error('SportsDataService: API key is required');
             this.useMockData = true;
         } else {
-            // Set to false by default to prioritize real data
+            // ALWAYS use real data with the valid API key
             this.useMockData = false;
+            console.log('SportsDataService: Using real data with API key');
         }
         
         // League IDs from TheSportsDB
@@ -45,27 +48,54 @@ class SportsDataService {
         this.cache = {};
         
         // Add connection status tracking
-        this.connectionStatus = {
+        this.networkStatus = {
             lastSuccessfulRequest: null,
-            failedRequestCount: 0,
-            isOnline: navigator.onLine
+            failedRequests: 0,
+            consecutiveFailures: 0,
+            isOnline: navigator.onLine,
+            lastNetworkCheck: Date.now()
+        };
+        
+        // Analytics tracking
+        this.analytics = {
+            totalRequests: 0,
+            cacheHits: 0,
+            cacheMisses: 0,
+            apiErrors: 0,
+            mockDataUsage: 0,
+            requestTimes: []
+        };
+        
+        // Logger
+        this.log = {
+            debug: (msg) => console.debug(`[SportsDataService] ${msg}`),
+            info: (msg) => console.info(`[SportsDataService] ${msg}`),
+            warn: (msg) => console.warn(`[SportsDataService] ${msg}`),
+            error: (msg, err) => console.error(`[SportsDataService] ${msg}`, err)
         };
         
         // Listen for online/offline events
         window.addEventListener('online', () => {
-            this.connectionStatus.isOnline = true;
-            console.log('SportsDataService: Connection restored, switching to online mode');
+            this.networkStatus.isOnline = true;
+            this.log.info('Connection restored, switching to online mode');
             this.useMockData = false; // Try to use real data again
+            
+            // Refresh stale cache when coming back online
+            this._refreshStaleDataWhenOnline();
         });
         
         window.addEventListener('offline', () => {
-            this.connectionStatus.isOnline = false;
-            console.log('SportsDataService: Connection lost, switching to offline mode');
-            this.useMockData = true; // Use mock data when offline
+            this.networkStatus.isOnline = false;
+            this.log.warn('Connection lost, switching to offline mode');
+            
+            if (this.config.useMockDataWhenOffline) {
+                this.useMockData = true;
+                this.log.info('Using mock data in offline mode');
+            }
         });
         
-        console.log('SportsDataService initialized');
-        console.log('Using mock data:', this.useMockData);
+        // Initialize immediately
+        this._initialize();
     }
     
     /**
@@ -90,13 +120,13 @@ class SportsDataService {
                 clearTimeout(timeoutId);
                 
                 // Update connection status
-                this.connectionStatus.lastSuccessfulRequest = Date.now();
-                this.connectionStatus.failedRequestCount = 0;
+                this.networkStatus.lastSuccessfulRequest = Date.now();
+                this.networkStatus.failedRequests = 0;
                 
                 return response;
             } catch (error) {
                 lastError = error;
-                this.connectionStatus.failedRequestCount++;
+                this.networkStatus.failedRequests++;
                 
                 if (attempt < this.config.retryAttempts - 1) {
                     console.warn(`Retry attempt ${attempt + 1} for ${url}`);
@@ -107,7 +137,7 @@ class SportsDataService {
         }
         
         // If we've reached max failed requests, switch to mock data temporarily
-        if (this.connectionStatus.failedRequestCount >= this.config.retryAttempts) {
+        if (this.networkStatus.failedRequests >= this.config.retryAttempts) {
             console.warn(`Multiple failed requests, temporarily switching to mock data mode`);
             this.useMockData = true;
         }
