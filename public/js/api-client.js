@@ -9,7 +9,7 @@
 class SportDBClient {
     constructor() {
         this.apiKey = '';
-        this.baseUrl = 'https://www.thesportsdb.com/api/v1/json';
+        this.baseUrl = '';
         this.host = '';
         this.initialized = false;
         this.initPromise = this.initialize();
@@ -17,17 +17,8 @@ class SportDBClient {
         this.retryDelay = 1000; // Delay between retries in ms
         this.requestTimeout = 10000; // Request timeout in ms
         
-        // League IDs from environment variables
-        this.leagueIds = {
-            NFL: '4391',
-            NBA: '4387',
-            MLB: '4424',
-            NHL: '4380',
-            PREMIER_LEAGUE: '4328',
-            LA_LIGA: '4335',
-            BUNDESLIGA: '4331',
-            SERIE_A: '4332'
-        };
+        // League IDs - will be populated from server config
+        this.leagueIds = {};
         
         // Integration with new ApiService if available
         this.useNewApiService = false;
@@ -39,7 +30,7 @@ class SportDBClient {
      */
     async initialize() {
         try {
-            // Fetch API configuration from server (preferred method)
+            // Fetch API configuration from server
             const response = await fetch('/api/config/sports-api', {
                 method: 'GET',
                 headers: {
@@ -47,61 +38,68 @@ class SportDBClient {
                 }
             });
             
-            if (response.ok) {
-                const config = await response.json();
-                
-                // Use the API key from server config
-                if (config.apiKey) {
-                    this.apiKey = config.apiKey;
-                } else {
-                    // If server doesn't provide API key, use default
-                    this.apiKey = '447279'; // TheSportsDB API key from env
-                }
-                
-                // Use base URL from config or default
-                this.baseUrl = config.baseUrl || 'https://www.thesportsdb.com/api/v1/json';
-                this.host = config.host || '';
-                
-                // Set up new API service integration if available
-                if (config.useNewApiService && window.ApiService) {
-                    this.useNewApiService = true;
-                    this.apiService = new window.ApiService({
-                        baseUrl: config.apiServiceUrl || '/api'
-                    });
-                }
-                
-                this.initialized = true;
-                console.log('SportDBClient initialized with configuration from server');
-                
-                return true;
-            } else {
-                throw new Error('Failed to fetch API configuration');
+            if (!response.ok) {
+                throw new Error(`Failed to fetch API configuration: ${response.status}`);
             }
-        } catch (error) {
-            console.error('Failed to initialize API client from server config:', error);
             
-            // Fallback to environment variables if available
+            const config = await response.json();
+            
+            // Use the API key from server config
+            this.apiKey = config.apiKey || '';
+            if (!this.apiKey) {
+                throw new Error('No API key provided by server configuration');
+            }
+            
+            // Use base URL from config
+            this.baseUrl = config.baseUrl || '';
+            if (!this.baseUrl) {
+                throw new Error('No base URL provided by server configuration');
+            }
+            
+            // Get league IDs from config
+            if (config.leagueIds) {
+                this.leagueIds = config.leagueIds;
+            }
+            
+            // Set up new API service integration if available
+            if (config.useNewApiService && window.ApiService) {
+                this.useNewApiService = true;
+                this.apiService = new window.ApiService({
+                    baseUrl: config.apiServiceUrl || '/api'
+                });
+                console.log('ApiService integration enabled');
+            }
+            
+            this.initialized = true;
+            console.log('SportDBClient initialized with configuration from server');
+            
+            return true;
+        } catch (error) {
+            console.error('Failed to initialize API client:', error);
+            
+            // Retry with server status endpoint as fallback
             try {
-                // FORCE USE TheSportsDB API key
-                this.apiKey = '447279'; // TheSportsDB API key from env
-                console.log('Using real TheSportsDB API key:', this.apiKey);
+                const statusResponse = await fetch('/api/status', {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
                 
-                this.baseUrl = 'https://www.thesportsdb.com/api/v1/json';
-                this.initialized = true;
-                
-                // Attempt to use ApiService if available for enhanced features
-                if (window.ApiService) {
-                    this.useNewApiService = true;
-                    this.apiService = new window.ApiService({
-                        baseUrl: '/api'
-                    });
-                    console.log('ApiService integration enabled');
+                if (statusResponse.ok) {
+                    const status = await statusResponse.json();
+                    if (status.apiReady) {
+                        // We can still use the API via proxied server calls
+                        this.initialized = true;
+                        this.usingServerProxy = true;
+                        console.log('SportDBClient initialized with server proxy mode');
+                        return true;
+                    }
                 }
                 
-                console.log('SportDBClient initialized with real data connection to TheSportsDB API');
-                return true;
+                throw new Error('Failed to initialize API client: No configuration available');
             } catch (fallbackError) {
-                console.error('Failed to initialize with fallback:', fallbackError);
+                console.error('API client initialization completely failed:', fallbackError);
                 this.initialized = false;
                 return false;
             }

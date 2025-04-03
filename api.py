@@ -27,10 +27,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Sports API configuration
+# Sports API configuration from environment variables
 SPORTS_API_KEY = os.getenv('SPORTS_API_KEY')
-THESPORTSDB_API_KEY = os.getenv('THESPORTSDB_API_KEY', '447279')
+THESPORTSDB_API_KEY = os.getenv('THESPORTSDB_API_KEY')
 ODDS_API_KEY = os.getenv('ODDS_API_KEY')
+SPORTS_API_BASE_URL = os.getenv('SPORTS_API_BASE_URL', 'https://www.thesportsdb.com/api/v1/json')
+
+# League IDs from environment variables
+LEAGUE_IDS = {
+    'NFL': os.getenv('NFL_LEAGUE_ID', '4391'),
+    'NBA': os.getenv('NBA_LEAGUE_ID', '4387'),
+    'MLB': os.getenv('MLB_LEAGUE_ID', '4424'),
+    'NHL': os.getenv('NHL_LEAGUE_ID', '4380'),
+    'PREMIER_LEAGUE': os.getenv('PREMIER_LEAGUE_ID', '4328'),
+    'LA_LIGA': os.getenv('LA_LIGA_ID', '4335'),
+    'BUNDESLIGA': os.getenv('BUNDESLIGA_ID', '4331'),
+    'SERIE_A': os.getenv('SERIE_A_ID', '4332')
+}
 
 # Import the predictive model
 try:
@@ -51,12 +64,24 @@ def index():
 def static_files(path):
     return app.send_static_file(path)
 
+@app.route('/api/status', methods=['GET'])
+def api_status():
+    """Return API status information"""
+    return jsonify({
+        'status': 'online',
+        'version': '1.0.0',
+        'timestamp': datetime.now().isoformat(),
+        'apiReady': bool(THESPORTSDB_API_KEY),
+        'modelReady': predictor is not None,
+        'dataServiceReady': bool(THESPORTSDB_API_KEY)
+    })
+
 @app.route('/api/config', methods=['GET'])
 def api_config():
     """Return API configuration for client"""
     return jsonify({
         'apiKey': THESPORTSDB_API_KEY,
-        'apiUrl': 'https://www.thesportsdb.com/api/v1/json',
+        'apiUrl': SPORTS_API_BASE_URL,
         'version': '1.0.0'
     })
 
@@ -65,9 +90,30 @@ def sports_api_config():
     """Return Sports API configuration"""
     return jsonify({
         'apiKey': THESPORTSDB_API_KEY,
-        'baseUrl': 'https://www.thesportsdb.com/api/v1/json',
+        'baseUrl': SPORTS_API_BASE_URL,
         'useNewApiService': True,
-        'apiServiceUrl': '/api'
+        'apiServiceUrl': '/api',
+        'leagueIds': LEAGUE_IDS
+    })
+
+@app.route('/api/config/predictions', methods=['GET'])
+def predictions_config():
+    """Return predictions configuration"""
+    # Use environment variables for defaults or fallback to reasonable values
+    return jsonify({
+        'defaultValues': {
+            'sportType': os.getenv('DEFAULT_SPORT_TYPE', 'soccer'),
+            'homeTeam': os.getenv('DEFAULT_HOME_TEAM', 'Liverpool'),
+            'awayTeam': os.getenv('DEFAULT_AWAY_TEAM', 'Manchester City')
+        },
+        'supportedLeagues': list(LEAGUE_IDS.keys()),
+        'leagueIds': LEAGUE_IDS,
+        'predictionFactors': {
+            'pointSpread': os.getenv('ENABLE_POINT_SPREAD', 'true').lower() == 'true',
+            'overUnder': os.getenv('ENABLE_OVER_UNDER', 'true').lower() == 'true',
+            'moneyline': os.getenv('ENABLE_MONEYLINE', 'true').lower() == 'true',
+            'props': os.getenv('ENABLE_PROPS', 'true').lower() == 'true'
+        }
     })
 
 @app.route('/api/predictions/generate', methods=['POST'])
@@ -93,7 +139,7 @@ def generate_prediction():
             league = data.get('league', 'NBA')  # Default to NBA if not specified
             
             # Convert league name to ID if needed
-            league_id = predictor.LEAGUE_IDS.get(league, predictor.LEAGUE_IDS['NBA'])
+            league_id = LEAGUE_IDS.get(league, LEAGUE_IDS['NBA'])
             
             # Prepare input data for prediction
             input_data = {
@@ -134,11 +180,11 @@ def generate_prediction():
             elif 'factors' in prediction_result and prediction_result['factors']:
                 factors = prediction_result['factors']
             else:
-                # Default factors
+                # Default factors from environment variables
                 factors = [
-                    "Recent team performance",
-                    "Head-to-head record",
-                    "Home court advantage"
+                    os.getenv('DEFAULT_FACTOR_1', "Recent team performance"),
+                    os.getenv('DEFAULT_FACTOR_2', "Head-to-head record"),
+                    os.getenv('DEFAULT_FACTOR_3', "Home advantage")
                 ]
             
             response = {
@@ -154,21 +200,30 @@ def generate_prediction():
             
             return jsonify(response)
         else:
-            # No model available, return error
+            # No model available, use API-based prediction
+            logger.warning("Predictive model not available, using external API")
+            
+            # Try to get prediction from external API
+            try:
+                if SPORTS_API_KEY:
+                    # Use external sports prediction API
+                    external_prediction = get_external_prediction(
+                        data['homeTeam'], 
+                        data['awayTeam'],
+                        data.get('league', 'NBA')
+                    )
+                    
+                    if external_prediction:
+                        return jsonify(external_prediction)
+            except Exception as api_error:
+                logger.error(f"External API prediction failed: {str(api_error)}")
+            
+            # Return error with clear indication data is not available
             return jsonify({
-                'error': 'Predictive model not available',
-                'homeTeam': data['homeTeam'],
-                'awayTeam': data['awayTeam'],
-                'homeWinProbability': 0.5,
-                'awayWinProbability': 0.5,
-                'confidence': 0.5,
-                'factors': [
-                    "Basic statistical analysis",
-                    "Home team advantage",
-                    "Historical matchup data"
-                ],
-                'source': 'fallback'
-            }), 200
+                'error': 'Prediction services temporarily unavailable',
+                'status': 'error',
+                'message': 'Please try again later'
+            }), 503
             
     except Exception as e:
         logger.error(f"Error generating prediction: {str(e)}")
@@ -178,6 +233,45 @@ def generate_prediction():
             'source': 'error'
         }), 500
 
+def get_external_prediction(home_team, away_team, league):
+    """Get prediction from external API if available"""
+    # Implement external API call here if needed
+    # This is a placeholder for integration with a third-party prediction service
+    return None
+
+@app.route('/api/predictions/fallback', methods=['POST'])
+def fallback_prediction():
+    """Provide fallback prediction using simple statistics"""
+    try:
+        data = request.json
+        if not data or 'homeTeam' not in data or 'awayTeam' not in data:
+            return jsonify({'error': 'Invalid request data'}), 400
+            
+        # This is a simplified statistical fallback when no other prediction is available
+        # In a production environment, this would use cached data or simplified models
+        league = data.get('league', 'NBA')
+        
+        # Return a simple response with clear indication this is backup data
+        return jsonify({
+            'homeTeam': data['homeTeam'],
+            'awayTeam': data['awayTeam'],
+            'homeWinProbability': 0.55,  # Simple home advantage
+            'awayWinProbability': 0.45,
+            'confidence': 0.6,  # Lower confidence since this is just a fallback
+            'factors': [
+                "Basic home advantage statistics",
+                "Historical league averages",
+                "Simplified statistical model"
+            ],
+            'source': 'fallback',
+            'isBackupPrediction': True
+        })
+    except Exception as e:
+        logger.error(f"Fallback prediction error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port, debug=True) 
+    host = os.environ.get('HOST', '0.0.0.0')
+    debug = os.environ.get('DEBUG', 'true').lower() == 'true'
+    app.run(host=host, port=port, debug=debug) 

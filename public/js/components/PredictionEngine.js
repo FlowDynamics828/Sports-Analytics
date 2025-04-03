@@ -21,23 +21,39 @@ class PredictionEngine extends Component {
           <p>Analyzing data...</p>
         </div>
       `,
-      fallbackMode: true, // Use demo data if API fails
-      defaultValues: {
-        sportType: 'soccer',
-        homeTeam: 'Liverpool',
-        awayTeam: 'Manchester City'
-      },
-      alwaysAttemptRealData: true, // Always try to get real data first
       maxRetries: 2, // Number of retries for API calls
-      retryDelay: 1000 // Delay between retries in ms
+      retryDelay: 1000, // Delay between retries in ms
+      alternateApiEndpoint: '/api/predictions/fallback',
+      configEndpoint: '/api/config/predictions'
     }, options));
     
     // Component state
     this.state = {
       isLoading: false,
       error: null,
-      result: null
+      result: null,
+      config: null
     };
+    
+    // Initialize config
+    this.loadConfig();
+  }
+  
+  /**
+   * Load configuration from server
+   */
+  async loadConfig() {
+    try {
+      const response = await fetch(this.options.configEndpoint);
+      if (response.ok) {
+        this.state.config = await response.json();
+        this.debug('Configuration loaded:', this.state.config);
+      } else {
+        this.debug('Failed to load config, status:', response.status);
+      }
+    } catch (error) {
+      this.debug('Error loading config:', error);
+    }
   }
   
   /**
@@ -73,18 +89,28 @@ class PredictionEngine extends Component {
       });
     }
     
-    // Set default values
-    if (this.options.defaultValues) {
-      Object.entries(this.options.defaultValues).forEach(([key, value]) => {
+    // Apply defaults from configuration if available
+    this.applyDefaultValues();
+    
+    // Call parent init
+    super.init();
+  }
+  
+  /**
+   * Apply default values from configuration
+   */
+  applyDefaultValues() {
+    // Apply defaults from config if available
+    if (this.state.config && this.state.config.defaultValues) {
+      const defaults = this.state.config.defaultValues;
+      
+      Object.entries(defaults).forEach(([key, value]) => {
         const field = this.form.elements[key];
         if (field && !field.value) {
           field.value = value;
         }
       });
     }
-    
-    // Call parent init
-    super.init();
   }
   
   /**
@@ -137,7 +163,7 @@ class PredictionEngine extends Component {
   }
   
   /**
-   * Get prediction from API or fallback to demo data
+   * Get prediction from API
    * @param {Object} formData - Form data
    * @returns {Object} Prediction data
    */
@@ -182,7 +208,7 @@ class PredictionEngine extends Component {
         }
       }
       
-      // All API attempts failed, use fallback
+      // All API attempts failed, use fallback API endpoint
       throw lastError || new Error('Failed to get prediction after multiple attempts');
       
     } catch (apiError) {
@@ -212,42 +238,9 @@ class PredictionEngine extends Component {
         this.debug('Alternate API endpoint also failed:', altError);
       }
       
-      // Use demo data if fallback mode is enabled
-      if (this.options.fallbackMode) {
-        this.showApiError(apiError.message);
-        return this.generateDemoPrediction(formData);
-      }
-      
-      // Otherwise, rethrow the error
-      throw apiError;
+      // If all attempts failed, report the error
+      throw new Error('All prediction endpoints failed. Please try again later.');
     }
-  }
-  
-  /**
-   * Generate demo prediction data
-   * @param {Object} formData - Form data
-   * @returns {Object} Demo prediction
-   */
-  generateDemoPrediction(formData) {
-    const homeTeam = formData.homeTeam;
-    const awayTeam = formData.awayTeam;
-    const homeWinProb = Math.random() * 0.4 + 0.3; // 30-70%
-    
-    return {
-      homeTeam,
-      awayTeam,
-      homeWinProbability: homeWinProb,
-      awayWinProbability: 1 - homeWinProb,
-      factors: [
-        "Recent team performance (last 10 games)",
-        "Head-to-head historical matchups",
-        "Home court advantage factor",
-        "Key player availability",
-        "Rest days advantage"
-      ],
-      confidence: Math.random() * 0.15 + 0.75, // 75-90%
-      demoMode: true
-    };
   }
   
   /**
@@ -263,12 +256,12 @@ class PredictionEngine extends Component {
   }
   
   /**
-   * Show API error message
+   * Show error message
    * @param {string} message - Error message
    */
   showApiError(message) {
     if (this.errorContainer) {
-      this.errorContainer.textContent = `Note: Using demo data due to API unavailability. Error: ${message}`;
+      this.errorContainer.textContent = `API Error: ${message}. Please try again.`;
       this.errorContainer.style.display = 'block';
       
       // Hide error after 5 seconds

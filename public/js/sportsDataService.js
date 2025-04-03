@@ -9,40 +9,22 @@ class SportsDataService {
      * Initialize the sports data service
      */
     constructor() {
-        // API configuration
+        // Default configuration that will be overridden by server config
         this.config = {
-            apiKey: window.ENV?.THESPORTSDB_API_KEY || '447279',  // TheSportsDB API key - priority to environment variables
-            baseUrl: 'https://www.thesportsdb.com/api/v1/json/',
+            baseUrl: '',
             cacheTime: 3600000, // Cache duration in milliseconds (1 hour)
             timeout: 10000,      // Request timeout in milliseconds
             retryAttempts: 3,    // Number of retry attempts
             retryDelay: 1000,    // Delay between retries in milliseconds
-            preferRealData: true, // Always prefer real data over mock data
-            fallbackToMock: true, // Fall back to mock data if API fails
             useMockDataWhenOffline: true // Use mock data when offline
         };
         
-        // API key validation
-        if (!this.config.apiKey) {
-            console.error('SportsDataService: API key is required');
-            this.useMockData = true;
-        } else {
-            // ALWAYS use real data with the valid API key
-            this.useMockData = false;
-            console.log('SportsDataService: Using real data with API key');
-        }
+        // Initialize as not ready until config is loaded
+        this.isConfigLoaded = false;
+        this.useMockData = false;
         
-        // League IDs from TheSportsDB
-        this.leagueIds = {
-            nba: '4387',
-            nfl: '4391',
-            mlb: '4424',
-            nhl: '4380',
-            premierleague: '4328',
-            laliga: '4335',
-            bundesliga: '4331', 
-            seriea: '4332'
-        };
+        // League IDs - will be populated from server config
+        this.leagueIds = {};
         
         // Initialize cache
         this.cache = {};
@@ -78,7 +60,11 @@ class SportsDataService {
         window.addEventListener('online', () => {
             this.networkStatus.isOnline = true;
             this.log.info('Connection restored, switching to online mode');
-            this.useMockData = false; // Try to use real data again
+            
+            // Always prefer real data when online
+            if (this.isConfigLoaded) {
+                this.useMockData = false;
+            }
             
             // Refresh stale cache when coming back online
             this._refreshStaleDataWhenOnline();
@@ -96,6 +82,89 @@ class SportsDataService {
         
         // Initialize immediately
         this._initialize();
+    }
+    
+    /**
+     * Initialize the service with configuration from server
+     * @private
+     */
+    async _initialize() {
+        try {
+            const response = await fetch('/api/config/sports-api', {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to fetch API configuration: ${response.status}`);
+            }
+            
+            const serverConfig = await response.json();
+            
+            // Update configuration
+            this.config = {
+                ...this.config,
+                ...serverConfig,
+                apiKey: serverConfig.apiKey || '',
+                baseUrl: serverConfig.baseUrl || '',
+            };
+            
+            // Get league IDs from config
+            if (serverConfig.leagueIds) {
+                this.leagueIds = serverConfig.leagueIds;
+            }
+            
+            // Validation
+            if (!this.config.apiKey) {
+                throw new Error('No API key provided by server configuration');
+            }
+            
+            if (!this.config.baseUrl) {
+                throw new Error('No base URL provided by server configuration');
+            }
+            
+            // Set status
+            this.isConfigLoaded = true;
+            this.useMockData = false;
+            
+            this.log.info('Configuration loaded successfully');
+            this.log.debug('Using real data API');
+            
+            return true;
+        } catch (error) {
+            this.log.error('Failed to initialize with server config:', error);
+            
+            // Try fallback status endpoint
+            try {
+                const statusResponse = await fetch('/api/status', {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (statusResponse.ok) {
+                    const status = await statusResponse.json();
+                    if (status.dataServiceReady) {
+                        // We can use the API via server proxy
+                        this.isConfigLoaded = true;
+                        this.useMockData = false;
+                        this.usingServerProxy = true;
+                        this.log.info('Initialized with server proxy mode');
+                        return true;
+                    }
+                }
+                
+                throw new Error('Data service not ready');
+            } catch (fallbackError) {
+                this.log.error('Initialization completely failed:', fallbackError);
+                this.isConfigLoaded = false;
+                this.useMockData = true;
+                return false;
+            }
+        }
     }
     
     /**
